@@ -15,11 +15,11 @@ from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 from urllib3.exceptions import InsecureRequestWarning
 
 # --- إعدادات البوت الأول ---
-TOKEN = '8890151932:AAG9fJqew3LKUTD5Q93JVyLKnK4hEYKUHew'
+TOKEN = '8890151932:AAGApt2m-_hBsO6WobYGG3vYuaMAmPWFx1o'
 bot = telebot.TeleBot(TOKEN)
 
 # --- إعدادات البوت الثاني (الاحتياطي / الإرسال) ---
-SECOND_BOT_TOKEN = '8355346917:AAHNnllGrxoOsB7Gh26u7eTKFBjbdz-D2zQ'
+SECOND_BOT_TOKEN = '8405233850:AAFiXno50YZsoFZYDAL1lVkfppy6S9_zgI0'
 SECOND_BOT_CHAT_ID = 'https://t.me/faresschannel'
 secondary_bot = telebot.TeleBot(SECOND_BOT_TOKEN)
 
