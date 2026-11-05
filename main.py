@@ -15,6 +15,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot import apihelper
+
+# زيادة مهلة الاتصال الخاصة بـ pyTelegramBotAPI لمنع مشاكل الـ Timeout
+apihelper.CONNECT_TIMEOUT = 60
+apihelper.READ_TIMEOUT = 60
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -362,9 +367,7 @@ def process_single_line(line):
         if not netflix_id:
             return None
         
-        # تأخير بسيط لمنع حظر الطلبات السريعة (Rate Limit)
-        time.sleep(0.5)
-        
+        time.sleep(0.3)
         account_info = check_netflix_cookie({"NetflixId": netflix_id})
         if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
             token_result = generate_token(netflix_id)
@@ -460,7 +463,10 @@ def pull_account(message):
 def callback_check_sub(call):
     if check_subscription(call.from_user.id):
         bot.answer_callback_query(call.id, "✅ تم التحقق من اشتراكك بنجاح! يمكنك استخدام البوت الآن.")
-        bot.delete_message(call.message.chat.id, call.message.message_id)
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
         send_welcome(call.message)
     else:
         bot.answer_callback_query(call.id, "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
@@ -511,8 +517,8 @@ def handle_documents(message):
         valid_count = 0
         valid_accounts_text = ""
 
-        # استخدام عدد خيوط آمن (max_workers=3) لمنع حظر الطلبات من Netflix
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        # استخدام عدد خيوط آمن (max_workers=2) لمنع ضغط الشبكة ومشاكل Timeout
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(process_single_line, line.strip()) for line in all_lines if line.strip()]
             for future in as_completed(futures):
                 try:
@@ -537,7 +543,10 @@ def handle_documents(message):
                 except Exception as ex:
                     logger.error(f"Error handling future result: {ex}")
 
-        bot.edit_message_text(f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب شغال في الذاكرة.", message.chat.id, msg_wait.message_id)
+        try:
+            bot.edit_message_text(f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب شغال في الذاكرة.", message.chat.id, msg_wait.message_id)
+        except:
+            pass
 
         if valid_count > 0 and valid_accounts_text:
             result_file_path = os.path.join(unique_dir, "valid_accounts.txt")
@@ -603,4 +612,4 @@ def handle_text_message(message):
 
 if __name__ == '__main__':
     logger.info("Telegram Bot is running...")
-    bot.infinity_polling()
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
