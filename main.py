@@ -57,6 +57,7 @@ def save_db(data):
 def add_account_to_db(account_info):
     db = load_db()
     netflix_id = account_info['cookie'].get('NetflixId')
+    # التحقق مما إذا كان الحساب موجوداً مسبقاً لتجنب التكرار
     exists = any(acc['cookie'].get('NetflixId') == netflix_id or (acc.get('email') != 'Unknown' and acc.get('email') == account_info.get('email')) for acc in db['accounts'])
     if not exists:
         db['accounts'].append(account_info)
@@ -370,8 +371,7 @@ def process_single_line(line):
         time.sleep(0.3)
         account_info = check_netflix_cookie({"NetflixId": netflix_id})
         if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
-            token_result = generate_token(netflix_id)
-            account_info['token_result'] = token_result
+            # لا داعي لتوليد التوكن هنا وحفظه قديماً، سنقوم بحفظ البيانات الأساسية مع الكوكي لنقوم بتوليد توكن طازج عند السحب
             add_account_to_db(account_info)
             return account_info
     except Exception as e:
@@ -399,9 +399,9 @@ def send_welcome(message):
     welcome_text = (
         "🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
         "🔹 أرسل لي نص الكوكي، أو ارفع ملف `.txt` أو ملف مضغوط `.zip` وسأقوم بفحصه بدقة واستقرار.\n"
-        "🔹 يتم حفظ الحسابات الصالحة تلقائياً في ذاكرة البوت.\n\n"
+        "🔹 يتم حفظ الحسابات الصالحة تلقائياً في ذاكرة البوت مع روابط دخول طازجة عند السحب.\n\n"
         "📋 **الأوامر المتاحة:**\n"
-        "▪️ `/pull` أو `/getaccount` - لسحب حساب شغال من الذاكرة.\n"
+        "▪️ `/pull` أو `/getaccount` - لسحب حساب شغال وذو رابط طازج من الذاكرة.\n"
         "▪️ `/stats` - لعرض إحصائيات البوت والحسابات المخزنة.\n"
     )
     bot.reply_to(message, welcome_text, parse_mode='Markdown')
@@ -440,11 +440,18 @@ def pull_account(message):
         bot.reply_to(message, "❌ عذراً، الذاكرة فارغة حالياً ولا توجد حسابات شغالة مخزنة. قم بفحص بعض الملفات أولاً!")
         return
 
+    # سحب أول حساب من القائمة
     acc = accounts.pop(0)
     db["accounts"] = accounts
     save_db(db)
 
-    res_msg = "🎬 **حساب NETFLIX مسحوب من الذاكرة بنجاح** 🎬\n\n"
+    msg_wait = bot.reply_to(message, "⏳ جاري سحب الحساب وتوليد رابط دخول طازج وفعال...")
+
+    # توليد توكن طازج لحظة السحب باستخدام الـ NetflixId المخزن لضمان عدم انتهاء الصلاحية
+    netflix_id = acc['cookie'].get('NetflixId')
+    token_result = generate_token(netflix_id)
+
+    res_msg = "🎬 **حساب NETFLIX مسحوب من الذاكرة (برابط طازج)** 🎬\n\n"
     res_msg += f"🌍 البلد: `{acc['country']}`\n"
     res_msg += f"📦 الباقة: `{acc['plan']}`\n"
     res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
@@ -452,12 +459,16 @@ def pull_account(message):
     res_msg += f"👥 الملفات: `{acc['profiles']}`\n"
     res_msg += f"📧 البريد: `{acc['email'].replace(chr(92) + 'x40', '@')}`\n"
     
-    token_result = acc.get('token_result', {})
     if token_result.get('status') == 'Success':
         mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-        res_msg += f"\n📱 **رابط الدخول المباشر:**\n`{mobile_url}`"
+        res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
+    else:
+        res_msg += f"\n⚠️ **فشل توليد رابط طازج (قد يكون الكوكي انتهى تماماً من المصدر).**"
     
-    bot.reply_to(message, res_msg, parse_mode='Markdown')
+    try:
+        bot.edit_message_text(res_msg, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+    except:
+        bot.send_message(message.chat.id, res_msg, parse_mode='Markdown')
 
 @bot.callback_query_handler(func=lambda call: call.data == "check_sub")
 def callback_check_sub(call):
@@ -517,7 +528,6 @@ def handle_documents(message):
         valid_count = 0
         valid_accounts_text = ""
 
-        # استخدام عدد خيوط آمن (max_workers=2) لمنع ضغط الشبكة ومشاكل Timeout
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(process_single_line, line.strip()) for line in all_lines if line.strip()]
             for future in as_completed(futures):
@@ -525,7 +535,7 @@ def handle_documents(message):
                     acc = future.result()
                     if acc:
                         valid_count += 1
-                        res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
+                        res_msg = "🎬 حساب NETFLIX صالح وفعال (تم الحفظ) 🎬\n\n"
                         res_msg += f"🌍 البلد: `{acc['country']}`\n"
                         res_msg += f"📦 الباقة: `{acc['plan']}`\n"
                         res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
@@ -533,18 +543,13 @@ def handle_documents(message):
                         res_msg += f"👥 الملفات: `{acc['profiles']}`\n"
                         res_msg += f"📧 البريد: `{acc['email'].replace(chr(92) + 'x40', '@')}`\n"
                         
-                        token_result = acc.get('token_result', {})
-                        if token_result.get('status') == 'Success':
-                            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-                            res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
-                            
                         bot.send_message(message.chat.id, res_msg, parse_mode='Markdown')
                         valid_accounts_text += f"Email: {acc['email']} | Plan: {acc['plan']} | Expiry: {acc['next_billing']}\n"
                 except Exception as ex:
                     logger.error(f"Error handling future result: {ex}")
 
         try:
-            bot.edit_message_text(f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب شغال في الذاكرة.", message.chat.id, msg_wait.message_id)
+            bot.edit_message_text(f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب في الذاكرة (بروابط طازجة عند السحب).", message.chat.id, msg_wait.message_id)
         except:
             pass
 
