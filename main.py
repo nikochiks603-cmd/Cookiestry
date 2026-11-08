@@ -34,7 +34,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHS
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ضع آيدي الأدمن الخاص بك هنا
-ADMIN_IDS = [8713916851] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
+ADMIN_IDS = [123456789] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
 
 # إعدادات الاشتراك الإجباري لقناتك
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
@@ -101,7 +101,6 @@ def load_db():
         with open(DB_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
             if "users" not in data or isinstance(data["users"], list):
-                # تحويل هيكل المستخدمين القديم إلى نظام النقاط
                 old_users = data.get("users", [])
                 data["users"] = {str(uid): {"points": 5, "banned": False} for uid in old_users}
             if "redeem_codes" not in data:
@@ -119,7 +118,7 @@ def get_user_data(user_id):
     db = load_db()
     str_id = str(user_id)
     if str_id not in db["users"]:
-        db["users"][str_id] = {"points": 5, "banned": False} # 5 نقاط للمستخدم الجديد
+        db["users"][str_id] = {"points": 5, "banned": False}
         save_db(db)
     return db["users"][str_id]
 
@@ -133,7 +132,7 @@ def update_user_points(user_id, amount):
 def add_account_to_db(account_info):
     db = load_db()
     netflix_id = account_info['cookie'].get('NetflixId')
-    exists = any(acc['cookie'].get('NetflixId') == netflix_id or (acc.get('email') != 'Unknown' and acc.get('email'] == account_info.get('email')) for acc in db['accounts'])
+    exists = any(acc['cookie'].get('NetflixId') == netflix_id or (acc.get('email') != 'Unknown' and acc.get('email') == account_info.get('email')) for acc in db['accounts'])
     if not exists:
         db['accounts'].append(account_info)
         db['stats']['valid'] = len(db['accounts'])
@@ -173,7 +172,6 @@ def format_billing_date(raw):
             return raw
 
 def extract_netflix_id(content):
-    # فحص إذا كان المُدخل عبارة عن رابط توكن مباشر (Token Checker)
     token_match = re.search(r'nftoken=([^\s&]+)', content)
     if token_match:
         return {"type": "token", "value": token_match.group(1)}
@@ -596,7 +594,6 @@ def execute_pull_account(chat_id, user_id):
         bot.send_message(chat_id, err_msg)
         return
 
-    # خصم نقطة واحدة عند سحب الحساب
     update_user_points(user_id, -1)
 
     acc = accounts.pop(0)
@@ -625,7 +622,7 @@ def execute_pull_account(chat_id, user_id):
         res_msg += f"👥 Profiles: `{acc['profiles']}`\n"
         res_msg += f"📧 Email: `{email}`\n"
         
-        if token_result.get('status'] == 'Success':
+        if token_result.get('status') == 'Success':
             mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
             res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
         else:
@@ -644,7 +641,7 @@ def execute_pull_account(chat_id, user_id):
         res_msg += f"👥 البروفايلات: `{acc['profiles']}`\n"
         res_msg += f"📧 البريد: `{email}`\n"
         
-        if token_result.get('status'] == 'Success':
+        if token_result.get('status') == 'Success':
             mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
             res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
         else:
@@ -876,7 +873,7 @@ def handle_documents(message):
                             res_msg += f"🔄 Next Billing: `{expiry}`\n"
                             res_msg += f"👥 Profiles: `{profiles}`\n"
                             res_msg += f"📧 Email: `{email}`\n"
-                            if token_result.get('status'] == 'Success':
+                            if token_result.get('status') == 'Success':
                                 res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
                             res_msg += f"\n\n👨‍💻 **Developer:** `{OWNER_CREDIT}`"
                         else:
@@ -890,7 +887,7 @@ def handle_documents(message):
                             res_msg += f"🔄 تاريخ التجديد: `{expiry}`\n"
                             res_msg += f"👥 البروفايلات: `{profiles}`\n"
                             res_msg += f"📧 البريد: `{email}`\n"
-                            if token_result.get('status'] == 'Success':
+                            if token_result.get('status') == 'Success':
                                 res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
                             res_msg += f"\n\n👨‍💻 **المطور:** `{OWNER_CREDIT}`"
                             
