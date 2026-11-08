@@ -34,7 +34,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHS
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ضع آيدي الأدمن الخاص بك هنا
-ADMIN_IDS = [123456789] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
+ADMIN_IDS = [8713916851] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
 
 # إعدادات الاشتراك الإجباري لقناتك
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
