@@ -120,7 +120,7 @@ def get_user_data(user_id):
     db = load_db()
     str_id = str(user_id)
     if str_id not in db["users"]:
-        db["users"][str_id] = {"points": 3, "banned": False} # تم تحديث الهدية الترحيبية إلى 3 نقاط
+        db["users"][str_id] = {"points": 3, "banned": False}
         save_db(db)
     return db["users"][str_id]
 
@@ -978,7 +978,7 @@ def handle_documents(message):
                         
                         token_result = acc.get('token_result', {})
                         token_val = token_result.get('token', 'N/A')
-                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status'] == 'Success' else 'Failed to generate'
+                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status') == 'Success' else 'Failed to generate'
 
                         if lang == 'en':
                             res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
