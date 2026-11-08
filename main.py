@@ -102,7 +102,7 @@ def load_db():
             data = json.load(f)
             if "users" not in data or isinstance(data["users"], list):
                 old_users = data.get("users", [])
-                data["users"] = {str(uid): {"points": 5, "banned": False} for uid in old_users}
+                data["users"] = {str(uid): {"points": 3, "banned": False} for uid in old_users}
             if "redeem_codes" not in data:
                 data["redeem_codes"] = {}
             if "user_last_pull" not in data:
@@ -120,7 +120,7 @@ def get_user_data(user_id):
     db = load_db()
     str_id = str(user_id)
     if str_id not in db["users"]:
-        db["users"][str_id] = {"points": 5, "banned": False}
+        db["users"][str_id] = {"points": 3, "banned": False} # تم تحديث الهدية الترحيبية إلى 3 نقاط
         save_db(db)
     return db["users"][str_id]
 
@@ -640,6 +640,7 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
     else:
         acc = accounts.pop(0)
 
+    # خصم نقطة واحدة من رصيد المستخدم فوراً
     update_user_points(user_id, -1)
     db["accounts"] = accounts
     
@@ -870,13 +871,6 @@ def callback_queries(call):
         )
         bot.send_message(call.message.chat.id, stats_msg, parse_mode='Markdown', disable_web_page_preview=True)
 
-    elif data.startswith("export_"):
-        bot.answer_callback_query(call.id)
-        parts = data.split("_")
-        format_type = parts[1]
-        # استخراج مسار الملف المؤقت أو بيانات التصدير المرتبطة
-        bot.send_message(call.message.chat.id, f"✅ Exporting in format: `{format_type}`..." if lang == 'en' else f"✅ جاري التصدير بالصيغة المطلوبة: `{format_type}`...")
-
 @bot.message_handler(content_types=['document'])
 def handle_documents(message):
     user_id = message.from_user.id
@@ -984,7 +978,7 @@ def handle_documents(message):
                         
                         token_result = acc.get('token_result', {})
                         token_val = token_result.get('token', 'N/A')
-                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status') == 'Success' else 'Failed to generate'
+                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status'] == 'Success' else 'Failed to generate'
 
                         if lang == 'en':
                             res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
@@ -1048,13 +1042,6 @@ def handle_documents(message):
             netscape_file_path = os.path.join(unique_dir, "netscape_cookies.txt")
             with open(netscape_file_path, 'w', encoding='utf-8') as nf:
                 nf.write(netscape_text)
-
-            # إرسال أزرار خيارات التصدير للمستخدم
-            export_markup = InlineKeyboardMarkup(row_width=2)
-            export_markup.add(
-                InlineKeyboardButton("📄 ملف التفاصيل الكاملة", callback_data="export_details"),
-                InlineKeyboardButton("🌐 ملف Netscape Cookies", callback_data="export_netscape")
-            )
 
             with open(result_file_path, 'rb') as rf:
                 caption_text = f"📁 Valid accounts summary file.\n👨‍💻 Developer: {OWNER_CREDIT}" if lang == 'en' else f"📁 ملف ملخص الحسابات الصالحة.\n👨‍💻 المطور: {OWNER_CREDIT}"
@@ -1139,7 +1126,7 @@ def handle_text_message(message):
             res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{account_info['member_since']}`\n"
             res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
             res_msg += f"👥 البروفايلات: `{account_info['profiles']}`\n"
-            res_msg += f"📧 البريد: `{account_info['email'].reset() if hasattr(account_info['email'], 'reset') else account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+            res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
             
             if token_result.get('status') == 'Success':
                 mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
