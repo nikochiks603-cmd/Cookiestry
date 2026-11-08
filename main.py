@@ -34,7 +34,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHS
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ضع آيدي الأدمن الخاص بك هنا
-ADMIN_IDS = [123456789] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
+ADMIN_IDS = [8713916851] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
 
 # إعدادات الاشتراك الإجباري لقناتك
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
@@ -860,7 +860,7 @@ def handle_documents(message):
                         
                         token_result = acc.get('token_result', {})
                         token_val = token_result.get('token', 'N/A')
-                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status'] == 'Success' else 'Failed to generate'
+                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status') == 'Success' else 'Failed to generate'
 
                         if lang == 'en':
                             res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
@@ -983,7 +983,7 @@ def handle_text_message(message):
             res_msg += f"👥 Profiles: `{account_info['profiles']}`\n"
             res_msg += f"📧 Email: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
             
-            if token_result.get('status'] == 'Success':
+            if token_result.get('status') == 'Success':
                 mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
                 res_msg += f"\n📱 Direct Login URL:\n`{mobile_url}`"
                 
@@ -1000,7 +1000,7 @@ def handle_text_message(message):
             res_msg += f"👥 البروفايلات: `{account_info['profiles']}`\n"
             res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
             
-            if token_result.get('status'] == 'Success':
+            if token_result.get('status') == 'Success':
                 mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
                 res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
                 
