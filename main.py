@@ -475,13 +475,7 @@ def send_welcome(message):
         bot.reply_to(message, "❌ You are banned from using this bot." if user_languages.get(user_id) == 'en' else "❌ أنت محظور من استخدام هذا البوت.")
         return
 
-    # أولاً: التحقق من الاشتراك الإجباري قبل إظهار أي شيء
-    if not check_subscription(user_id):
-        lang = user_languages.get(user_id, 'ar')
-        send_sub_required_message(message, lang)
-        return
-
-    # إذا كان مشتركاً، نظهر له اختيار اللغة بثلاث لغات أو اللغتين الأساسيتين
+    # إظهار زر اختيار اللغة أولاً لكل مستخدم جديد لضمان فهم الأجانب
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar"),
@@ -829,13 +823,8 @@ def execute_smart_pull(chat_id, user_id):
     email = selected_account.get('email', 'Unknown').replace(chr(92) + 'x40', '@')
     hold_status = "✅ Active" if lang == 'en' else "✅ نشط تماماً"
 
-    account_id_display = selected_account['cookie'].get('NetflixId', 'Unknown')
-    if len(account_id_display) > 25:
-        account_id_display = account_id_display[:25] + "..."
-
     if lang == 'en':
         res_msg = "🎬 **NETFLIX Account Pulled Successfully** 🎬\n\n"
-        res_msg += f"🆔 Account ID: `{account_id_display}`\n"
         res_msg += f"🌍 Country: `{country_full}`\n"
         res_msg += f"📦 Plan: `{selected_account.get('plan', 'Unknown')}`\n"
         res_msg += f"💰 Price: `{selected_account.get('plan_price', 'Unknown')}`\n"
@@ -853,7 +842,6 @@ def execute_smart_pull(chat_id, user_id):
         res_msg += f"\n\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
     else:
         res_msg = "🎬 **تم سحب حساب NETFLIX بنجاح** 🎬\n\n"
-        res_msg += f"🆔 معرف الحساب (ID): `{account_id_display}`\n"
         res_msg += f"🌍 البلد: `{country_full}`\n"
         res_msg += f"📦 الباقة: `{selected_account.get('plan', 'Unknown')}`\n"
         res_msg += f"💰 السعر: `{selected_account.get('plan_price', 'Unknown')}`\n"
@@ -923,10 +911,12 @@ def execute_replacement(chat_id, user_id):
 
 @bot.message_handler(commands=['pull', 'getaccount'])
 def pull_account_command(message):
-    if not check_subscription(message.from_user.id):
-        send_sub_required_message(message, user_languages.get(message.from_user.id, 'ar'))
+    user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    if not check_subscription(user_id):
+        send_sub_required_message(message, lang)
         return
-    execute_smart_pull(message.chat.id, message.from_user.id)
+    execute_smart_pull(message.chat.id, user_id)
 
 @bot.message_handler(func=lambda message: message.text and message.text.startswith("NETFLIX-"))
 def redeem_key_handler(message):
@@ -959,14 +949,15 @@ def callback_queries(call):
     except Exception:
         pass
 
-    # فحص الاشتراك الإجباري أولاً قبل تنفيذ أي زر (باستثناء زر التحقق من الاشتراك)
-    if data != "check_sub" and not check_subscription(user_id):
-        send_sub_required_message(call.message, lang)
-        return
-    
     if data.startswith("lang_"):
         new_lang = data.split("_")[1]
         user_languages[user_id] = new_lang
+        
+        # بعد اختيار اللغة، نفحص الاشتراك الإجباري فوراً بلغة المستخدم المختارة
+        if not check_subscription(user_id):
+            send_sub_required_message(call.message, new_lang)
+            return
+
         try:
             points = get_user_data(user_id)["points"]
             if new_lang == 'en':
@@ -1012,6 +1003,11 @@ def callback_queries(call):
         except Exception:
             show_main_menu(chat_id, user_id)
         return
+
+    # التحقق من الاشتراك لبقية الأزرار
+    if data != "check_sub" and not check_subscription(user_id):
+        send_sub_required_message(call.message, lang)
+        return
         
     elif data == "check_sub":
         if check_subscription(user_id):
@@ -1022,7 +1018,7 @@ def callback_queries(call):
             show_main_menu(chat_id, user_id)
         else:
             try:
-                bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ You haven't subscribed toкті the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
             except:
                 pass
             
@@ -1219,11 +1215,9 @@ def handle_documents(message):
                         token_result = acc.get('token_result', {})
                         token_val = token_result.get('token', 'N/A')
                         mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
-                        account_id_display = acc['cookie'].get('NetflixId', 'N/A')
 
                         if lang == 'en':
                             res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
-                            res_msg += f"🆔 Account ID: `{account_id_display}`\n"
                             res_msg += f"🌍 Country: `{country_full}`\n"
                             res_msg += f"📦 Plan: `{plan}`\n"
                             res_msg += f"💰 Price: `{price}`\n"
@@ -1235,7 +1229,6 @@ def handle_documents(message):
                             res_msg += f"\n📱 **Login URL:**\n`{mobile_url}`"
                         else:
                             res_msg = "🎬 **حساب NETFLIX صالح وفعال** 🎬\n\n"
-                            res_msg += f"🆔 معرف الحساب (ID): `{account_id_display}`\n"
                             res_msg += f"🌍 البلد: `{country_full}`\n"
                             res_msg += f"📦 الباقة: `{plan}`\n"
                             res_msg += f"💰 السعر: `{price}`\n"
@@ -1248,7 +1241,7 @@ def handle_documents(message):
                             
                         bot.send_message(message.chat.id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
                         
-                        valid_accounts_text += f"ID: {account_id_display}\nEmail: {email}\nPlan: {plan} | Country: {country_full}\nLogin URL: {mobile_url}\n\n"
+                        valid_accounts_text += f"Email: {email}\nPlan: {plan} | Country: {country_full}\nLogin URL: {mobile_url}\n\n"
                         netscape_text += f".netflix.com\tTRUE\t/\tTRUE\t1893456000\tNetflixId\t{acc['cookie'].get('NetflixId')}\n"
                 except Exception as ex:
                     logger.error(f"Error: {ex}")
@@ -1312,11 +1305,9 @@ def handle_text_message(message):
             add_account_to_db(account_info)
             
             country_full = get_country_name(account_info['country'], lang)
-            account_id_display = parsed['value']
             
             if lang == 'en':
                 res_msg = "🎬 **Checked Account Results** 🎬\n\n"
-                res_msg += f"🆔 Account ID: `{account_id_display}`\n"
                 res_msg += f"🌍 Country: `{country_full}`\n"
                 res_msg += f"📦 Plan: `{account_info['plan']}`\n"
                 res_msg += f"💰 Price: `{account_info['plan_price']}`\n"
@@ -1328,7 +1319,6 @@ def handle_text_message(message):
                 res_msg += f"\n📱 Login URL:\n`{token_result.get('direct_login_url')}`"
             else:
                 res_msg = "🎬 **نتيجة فحص الحساب** 🎬\n\n"
-                res_msg += f"🆔 معرف الحساب (ID): `{account_id_display}`\n"
                 res_msg += f"🌍 البلد: `{country_full}`\n"
                 res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
                 res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
