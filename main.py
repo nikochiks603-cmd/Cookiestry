@@ -475,11 +475,13 @@ def send_welcome(message):
         bot.reply_to(message, "❌ You are banned from using this bot." if user_languages.get(user_id) == 'en' else "❌ أنت محظور من استخدام هذا البوت.")
         return
 
+    # أولاً: التحقق من الاشتراك الإجباري قبل إظهار أي شيء
     if not check_subscription(user_id):
         lang = user_languages.get(user_id, 'ar')
         send_sub_required_message(message, lang)
         return
 
+    # إذا كان مشتركاً، نظهر له اختيار اللغة بثلاث لغات أو اللغتين الأساسيتين
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar"),
@@ -750,10 +752,9 @@ def execute_smart_pull(chat_id, user_id):
 
     session = user_pull_sessions.get(user_id, {})
     country = session.get('country', 'ALL')
-    quality = session.get('quality', 'ANY')      # '4K' (+1 pt) or 'HD' (0 pt) or 'ANY' (0 pt)
-    age = session.get('age', 'ANY')            # 'OLD' (+1 pt) or 'NEW' (0 pt) or 'ANY' (0 pt)
+    quality = session.get('quality', 'ANY')
+    age = session.get('age', 'ANY')
 
-    # حساب التكلفة الإجمالية بدقة (القاعدة: 1 نقطة، وتزيد إذا اخترت 4K أو تاريخ قديم)
     cost = 1
     if quality == '4K':
         cost += 1
@@ -816,7 +817,6 @@ def execute_smart_pull(chat_id, user_id):
         selected_account = accounts[0]
         token_result = generate_token(selected_account['cookie'].get('NetflixId'))
 
-    # خصم النقاط وزيادة عداد السحب للمستخدم بنجاح
     update_user_points(user_id, -cost)
     increment_user_stats(user_id, pulled=1)
 
@@ -959,6 +959,7 @@ def callback_queries(call):
     except Exception:
         pass
 
+    # فحص الاشتراك الإجباري أولاً قبل تنفيذ أي زر (باستثناء زر التحقق من الاشتراك)
     if data != "check_sub" and not check_subscription(user_id):
         send_sub_required_message(call.message, lang)
         return
@@ -1167,7 +1168,6 @@ def handle_documents(message):
         db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + len(all_lines)
         save_db(db)
         
-        # زيادة عداد الملفات والكوكيز المفحوصة للمستخدم
         increment_user_stats(user_id, checked=len(all_lines))
 
         valid_count = 0
@@ -1301,7 +1301,6 @@ def handle_text_message(message):
     db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + 1
     save_db(db)
     
-    # زيادة عداد الكوكيز المفحوصة للمستخدم بالرسائل الفردية
     increment_user_stats(user_id, checked=1)
 
     account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
