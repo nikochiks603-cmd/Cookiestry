@@ -121,7 +121,9 @@ def update_user_points(user_id, amount):
     str_id = str(user_id)
     if str_id in db["users"]:
         db["users"][str_id]["points"] += amount
-        save_db(db)
+    else:
+        db["users"][str_id] = {"points": 3 + amount, "banned": False}
+    save_db(db)
 
 def add_account_to_db(account_info):
     if account_info.get('on_payment_hold') == 'Yes':
@@ -694,9 +696,11 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
     selected_index = -1
     token_result = None
 
+    # البحث عن حساب متوافق مع الدولة المطلوبة بدقة
     for idx, acc in enumerate(accounts):
+        acc_country = acc.get('country', '').upper()
         if requested_country and requested_country != "ALL":
-            if acc.get('country', '').upper() != requested_country.upper():
+            if acc_country != requested_country.upper():
                 continue
         
         netflix_id = acc['cookie'].get('NetflixId')
@@ -715,6 +719,12 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             accounts = db.get("accounts", [])
             break
 
+    # إذا لم يوجد حساب مطابق تماماً للدولة وكان طلب الدولة محدد وليست ALL
+    if not selected_account and requested_country and requested_country != "ALL":
+        no_country_msg = f"❌ Sorry, no active accounts available right now for country ({requested_country}). Try 'ALL countries' or upload files." if lang == 'en' else f"❌ عذراً، لا توجد حسابات صالحة حالياً للدولة ({requested_country}). جرب خيار (أي دولة) أو ارفع ملفات جديدة."
+        bot.send_message(chat_id, no_country_msg)
+        return
+
     if not selected_account or not token_result or token_result.get('status') != 'Success':
         if accounts:
             acc = accounts.pop(0)
@@ -729,6 +739,7 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             bot.send_message(chat_id, msg)
             return
 
+    # خصم نقطة واحدة من رصيد المستخدم بنجاح هنا
     update_user_points(user_id, -1)
     
     if "user_last_pull" not in db:
@@ -859,6 +870,7 @@ def callback_queries(call):
             bot.answer_callback_query(call.id)
         except Exception:
             pass
+        # إرسال القائمة الرئيسية مباشرة وبشكل مستقل لتجنب تعليق الأندرويد
         show_main_menu(chat_id, user_id)
         return
         
