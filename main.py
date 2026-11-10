@@ -39,7 +39,7 @@ db_lock = threading.Lock()
 
 active_scans = {}
 user_languages = {}
-user_pull_sessions = {}  # لتخزين خيارات السحب المؤقتة للمستخدم
+user_pull_sessions = {}
 
 COUNTRY_DATA = {
     'US': {'ar': '🇺🇸 الولايات المتحدة', 'en': '🇺🇸 United States'},
@@ -99,6 +99,13 @@ def load_db():
                 data["redeem_codes"] = {}
             if "user_last_pull" not in data:
                 data["user_last_pull"] = {}
+            for uid, udata in data["users"].items():
+                if "pulled_count" not in udata:
+                    udata["pulled_count"] = 0
+                if "checked_count" not in udata:
+                    udata["checked_count"] = 0
+                if "join_date" not in udata:
+                    udata["join_date"] = datetime.now().strftime("%d/%m/%Y")
             return data
     except:
         return {"users": {}, "accounts": [], "stats": {"checked": 0, "valid": 0}, "redeem_codes": {}, "user_last_pull": {}}
@@ -112,7 +119,13 @@ def get_user_data(user_id):
     db = load_db()
     str_id = str(user_id)
     if str_id not in db["users"]:
-        db["users"][str_id] = {"points": 3, "banned": False}
+        db["users"][str_id] = {
+            "points": 3,
+            "banned": False,
+            "pulled_count": 0,
+            "checked_count": 0,
+            "join_date": datetime.now().strftime("%d/%m/%Y")
+        }
         save_db(db)
     return db["users"][str_id]
 
@@ -122,7 +135,23 @@ def update_user_points(user_id, amount):
     if str_id in db["users"]:
         db["users"][str_id]["points"] += amount
     else:
-        db["users"][str_id] = {"points": 3 + amount, "banned": False}
+        db["users"][str_id] = {
+            "points": 3 + amount,
+            "banned": False,
+            "pulled_count": 0,
+            "checked_count": 0,
+            "join_date": datetime.now().strftime("%d/%m/%Y")
+        }
+    save_db(db)
+
+def increment_user_stats(user_id, pulled=0, checked=0):
+    db = load_db()
+    str_id = str(user_id)
+    if str_id not in db["users"]:
+        get_user_data(user_id)
+        db = load_db()
+    db["users"][str_id]["pulled_count"] = db["users"][str_id].get("pulled_count", 0) + pulled
+    db["users"][str_id]["checked_count"] = db["users"][str_id].get("checked_count", 0) + checked
     save_db(db)
 
 def add_account_to_db(account_info):
@@ -486,6 +515,7 @@ def show_main_menu(chat_id, user_id):
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_country"),
+            InlineKeyboardButton("👤 My Profile (/profile)", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
             InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
             InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
@@ -504,6 +534,7 @@ def show_main_menu(chat_id, user_id):
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_country"),
+            InlineKeyboardButton("👤 حسابي وإحصائياتي (/profile)", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
             InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
             InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
@@ -512,6 +543,45 @@ def show_main_menu(chat_id, user_id):
             markup.add(InlineKeyboardButton("📊 لوحة الأدمن", callback_data="btn_admin"))
 
     bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='Markdown', disable_web_page_preview=True)
+
+def send_user_profile(chat_id, user_id):
+    lang = user_languages.get(user_id, 'ar')
+    user_data = get_user_data(user_id)
+    
+    points = user_data.get("points", 0)
+    pulled_count = user_data.get("pulled_count", 0)
+    checked_count = user_data.get("checked_count", 0)
+    join_date = user_data.get("join_date", "Unknown")
+
+    if lang == 'en':
+        profile_text = (
+            f"👤 **Your User Profile & Stats:**\n\n"
+            f"🆔 Telegram ID: `{user_id}`\n"
+            f"💰 Current Points: `{points}` 🪙\n"
+            f"🎟️ Accounts Pulled: `{pulled_count}`\n"
+            f"🔍 Files & Cookies Checked: `{checked_count}`\n"
+            f"📅 Join Date: `{join_date}`\n\n"
+            f"👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
+        )
+    else:
+        profile_text = (
+            f"👤 **ملفك الشخصي وإحصائياتك في البوت:**\n\n"
+            f"🆔 معرف الحساب (ID): `{user_id}`\n"
+            f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
+            f"🎟️ عدد الحسابات المسحوبة: `{pulled_count}`\n"
+            f"🔍 عدد الملفات والكوكيز المفحوصة: `{checked_count}`\n"
+            f"📅 تاريخ انضمامك للبوت: `{join_date}`\n\n"
+            f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
+        )
+    bot.send_message(chat_id, profile_text, parse_mode='Markdown', disable_web_page_preview=True)
+
+@bot.message_handler(commands=['profile', 'account'])
+def cmd_profile(message):
+    user_id = message.from_user.id
+    if not check_subscription(user_id):
+        send_sub_required_message(message, user_languages.get(user_id, 'ar'))
+        return
+    send_user_profile(message.chat.id, user_id)
 
 @bot.message_handler(commands=['id'])
 def cmd_id(message):
@@ -556,10 +626,7 @@ def cmd_broadcast(message):
 @bot.message_handler(commands=['stats', 'admin'])
 def admin_panel_command(message):
     user_id = message.from_user.id
-    lang = user_languages.get(user_id, 'ar')
-    
     if user_id not in ADMIN_IDS:
-        bot.reply_to(message, "❌ This command is for the admin only!" if lang == 'en' else "❌ هذا الأمر مخصص لمدير البوت فقط!")
         return
 
     db = load_db()
@@ -579,12 +646,10 @@ def admin_panel_command(message):
 @bot.message_handler(commands=['cleanmem'])
 def cmd_cleanmem(message):
     user_id = message.from_user.id
-    lang = user_languages.get(user_id, 'ar')
     if user_id not in ADMIN_IDS:
         return
     
-    msg_wait = bot.reply_to(message, "🧹 Cleaning memory... Re-checking all stored accounts." if lang == 'en' else "🧹 جاري تنظيف الذاكرة وإعادة فحص الحسابات وحذف التالفة...")
-    
+    msg_wait = bot.reply_to(message, "🧹 Cleaning memory...")
     db = load_db()
     accounts = db.get("accounts", [])
     valid_accounts = []
@@ -685,10 +750,10 @@ def execute_smart_pull(chat_id, user_id):
 
     session = user_pull_sessions.get(user_id, {})
     country = session.get('country', 'ALL')
-    quality = session.get('quality', 'ANY')      # '4K' (2 pts) or 'HD' (1 pt) or 'ANY' (1 pt)
-    age = session.get('age', 'ANY')            # 'OLD' (<= 2020 -> 2 pts) or 'NEW' (> 2020 -> 1 pt) or 'ANY' (1 pt)
+    quality = session.get('quality', 'ANY')      # '4K' (+1 pt) or 'HD' (0 pt) or 'ANY' (0 pt)
+    age = session.get('age', 'ANY')            # 'OLD' (+1 pt) or 'NEW' (0 pt) or 'ANY' (0 pt)
 
-    # حساب التكلفة الإجمالية للنقاط حسب طلب المستخدم
+    # حساب التكلفة الإجمالية بدقة (القاعدة: 1 نقطة، وتزيد إذا اخترت 4K أو تاريخ قديم)
     cost = 1
     if quality == '4K':
         cost += 1
@@ -713,23 +778,19 @@ def execute_smart_pull(chat_id, user_id):
     selected_account = None
     token_result = None
 
-    # تصفية الحسابات بناءً على الشروط المدخلة
     filtered = []
     for acc in accounts:
         acc_country = str(acc.get('country', '')).strip().upper()
         
-        # تصفية الدولة
         if country != "ALL" and acc_country != country.strip().upper():
             continue
             
-        # تصفية الجودة
         q_text = str(acc.get('video_quality', '')).upper()
         if quality == '4K' and 'ULTRA' not in q_text and '4K' not in q_text:
             continue
         elif quality == 'HD' and 'ULTRA' in q_text:
             continue
 
-        # تصفية تاريخ الاشتراك (سنة 2020 وما قبلها)
         member_since_raw = str(acc.get('member_since_raw', ''))
         year_match = re.search(r'(20\d\d|19\d\d)', member_since_raw)
         acc_year = int(year_match.group(1)) if year_match else 2021
@@ -741,7 +802,6 @@ def execute_smart_pull(chat_id, user_id):
 
         filtered.append(acc)
 
-    # إذا لم نجد مطابقاً تماماً للشروط المعقدة، نبحث في المتاح
     target_pool = filtered if filtered else accounts
 
     for acc in target_pool:
@@ -756,8 +816,9 @@ def execute_smart_pull(chat_id, user_id):
         selected_account = accounts[0]
         token_result = generate_token(selected_account['cookie'].get('NetflixId'))
 
-    # خصم النقاط
+    # خصم النقاط وزيادة عداد السحب للمستخدم بنجاح
     update_user_points(user_id, -cost)
+    increment_user_stats(user_id, pulled=1)
 
     if "user_last_pull" not in db:
         db["user_last_pull"] = {}
@@ -768,7 +829,6 @@ def execute_smart_pull(chat_id, user_id):
     email = selected_account.get('email', 'Unknown').replace(chr(92) + 'x40', '@')
     hold_status = "✅ Active" if lang == 'en' else "✅ نشط تماماً"
 
-    # جلب ID الحساب وتفاصيله الكاملة
     account_id_display = selected_account['cookie'].get('NetflixId', 'Unknown')
     if len(account_id_display) > 25:
         account_id_display = account_id_display[:25] + "..."
@@ -920,6 +980,7 @@ def callback_queries(call):
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
                     InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_country"),
+                    InlineKeyboardButton("👤 My Profile (/profile)", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
                     InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
                     InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
@@ -938,6 +999,7 @@ def callback_queries(call):
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
                     InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_country"),
+                    InlineKeyboardButton("👤 حسابي وإحصائياتي (/profile)", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
                     InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
                     InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
@@ -967,8 +1029,10 @@ def callback_queries(call):
         if user_id in active_scans:
             active_scans[user_id].set()
             
+    elif data == "btn_profile":
+        send_user_profile(chat_id, user_id)
+            
     elif data == "btn_pull_country":
-        # الخطوة 1: اختيار الدولة
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
         markup = InlineKeyboardMarkup(row_width=2)
@@ -985,7 +1049,6 @@ def callback_queries(call):
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_c_"):
-        # حفظ الدولة والانتقال لاختيار الجودة
         c_code = data.replace("pull_c_", "")
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
@@ -993,29 +1056,27 @@ def callback_queries(call):
 
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("📺 Ultra 4K (2 Points)", callback_data="pull_q_4K"),
-            InlineKeyboardButton("📺 HD (1 Point)", callback_data="pull_q_HD"),
-            InlineKeyboardButton("⚡ أي جودة عشوائية (1 Point)", callback_data="pull_q_ANY")
+            InlineKeyboardButton("📺 Ultra 4K (+1 Point)", callback_data="pull_q_4K"),
+            InlineKeyboardButton("📺 HD / Standard (0 Points extra)", callback_data="pull_q_HD"),
+            InlineKeyboardButton("⚡ أي جودة (0 Points extra)", callback_data="pull_q_ANY")
         )
-        msg_txt = "📺 **Step 2: Select Video Quality:**\n(Ultra 4K costs +1 extra point)" if lang == 'en' else "📺 **الخطوة 2: اختر جودة الحساب:**\n(أولترا 4K تزيد نقطة إضافية)"
+        msg_txt = "📺 **Step 2: Select Video Quality:**\n(Ultra 4K costs +1 extra point)" if lang == 'en' else "📺 **الخطوة 2: اختر جودة الحساب:**\n(Ultra 4K تزيد نقطة إضافية)"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_q_"):
-        # حفظ الجودة والانتقال لاختيار تاريخ الاشتراك
         q_type = data.replace("pull_q_", "")
         user_pull_sessions[user_id]['quality'] = q_type
 
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("⏳ تاريخ قديم 2020 وأقل (2 Points)", callback_data="pull_a_OLD"),
-            InlineKeyboardButton("🆕 تاريخ حديث بعد 2020 (1 Point)", callback_data="pull_a_NEW"),
-            InlineKeyboardButton("⚡ أي تاريخ (1 Point)", callback_data="pull_a_ANY")
+            InlineKeyboardButton("⏳ تاريخ قديم 2020 وأقل (+1 Point)", callback_data="pull_a_OLD"),
+            InlineKeyboardButton("🆕 تاريخ حديث بعد 2020 (0 Points extra)", callback_data="pull_a_NEW"),
+            InlineKeyboardButton("⚡ أي تاريخ (0 Points extra)", callback_data="pull_a_ANY")
         )
         msg_txt = "📅 **Step 3: Select Account Age / Subscription Date:**\n(Accounts from 2020 or older cost +1 extra point)" if lang == 'en' else "📅 **الخطوة 3: اختر تاريخ الاشتراك (عمر الحساب):**\n(الحسابات القديمة 2020 وما قبلها تزيد نقطة إضافية)"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_a_"):
-        # حفظ التاريخ وتنفيذ السحب النهائي
         a_type = data.replace("pull_a_", "")
         user_pull_sessions[user_id]['age'] = a_type
         execute_smart_pull(chat_id, user_id)
@@ -1105,6 +1166,9 @@ def handle_documents(message):
         db = load_db()
         db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + len(all_lines)
         save_db(db)
+        
+        # زيادة عداد الملفات والكوكيز المفحوصة للمستخدم
+        increment_user_stats(user_id, checked=len(all_lines))
 
         valid_count = 0
         valid_accounts_text = "========================================\n"
@@ -1236,6 +1300,9 @@ def handle_text_message(message):
     db = load_db()
     db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + 1
     save_db(db)
+    
+    # زيادة عداد الكوكيز المفحوصة للمستخدم بالرسائل الفردية
+    increment_user_stats(user_id, checked=1)
 
     account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
     
