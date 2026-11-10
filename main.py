@@ -475,7 +475,6 @@ def send_welcome(message):
         bot.reply_to(message, "❌ You are banned from using this bot." if user_languages.get(user_id) == 'en' else "❌ أنت محظور من استخدام هذا البوت.")
         return
 
-    # إظهار زر اختيار اللغة أولاً لكل مستخدم جديد لضمان فهم الأجانب
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar"),
@@ -847,7 +846,7 @@ def execute_smart_pull(chat_id, user_id):
         res_msg += f"💰 السعر: `{selected_account.get('plan_price', 'Unknown')}`\n"
         res_msg += f"📺 الجودة: `{selected_account.get('video_quality', 'Unknown')}` | الشاشات: `{selected_account.get('max_streams', 'Unknown')}`\n"
         res_msg += f"💳 حالة الحساب: `{hold_status}`\n"
-        res_msg += f"📅 تاريخ الاشتراك: `{selected_account.get('member_since', 'Unknown')}`\n"
+        res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{selected_account.get('member_since', 'Unknown')}`\n"
         res_msg += f"🔄 تاريخ التجديد: `{selected_account.get('next_billing', 'Unknown')}`\n"
         res_msg += f"👥 البروفايلات: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 البريد: `{email}`\n"
@@ -953,7 +952,6 @@ def callback_queries(call):
         new_lang = data.split("_")[1]
         user_languages[user_id] = new_lang
         
-        # بعد اختيار اللغة، نفحص الاشتراك الإجباري فوراً بلغة المستخدم المختارة
         if not check_subscription(user_id):
             send_sub_required_message(call.message, new_lang)
             return
@@ -1004,7 +1002,6 @@ def callback_queries(call):
             show_main_menu(chat_id, user_id)
         return
 
-    # التحقق من الاشتراك لبقية الأزرار
     if data != "check_sub" and not check_subscription(user_id):
         send_sub_required_message(call.message, lang)
         return
@@ -1018,7 +1015,7 @@ def callback_queries(call):
             show_main_menu(chat_id, user_id)
         else:
             try:
-                bot.answer_callback_query(call.id, "❌ You haven't subscribed toкті the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
             except:
                 pass
             
@@ -1028,6 +1025,9 @@ def callback_queries(call):
             
     elif data == "btn_profile":
         send_user_profile(chat_id, user_id)
+
+    elif data == "back_to_menu":
+        show_main_menu(chat_id, user_id)
             
     elif data == "btn_pull_country":
         if user_id not in user_pull_sessions:
@@ -1042,6 +1042,7 @@ def callback_queries(call):
             InlineKeyboardButton("🇩🇿 الجزائر (DZ)", callback_data="pull_c_DZ"),
             InlineKeyboardButton("🇸🇦 السعودية (SA)", callback_data="pull_c_SA")
         )
+        markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_menu"))
         msg_txt = "🌍 **Step 1: Select Country:**" if lang == 'en' else "🌍 **الخطوة 1: اختر الدولة المطلوبة:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -1057,6 +1058,7 @@ def callback_queries(call):
             InlineKeyboardButton("📺 HD / Standard (0 Points extra)", callback_data="pull_q_HD"),
             InlineKeyboardButton("⚡ أي جودة (0 Points extra)", callback_data="pull_q_ANY")
         )
+        markup.add(InlineKeyboardButton("🔙 رجوع لاختيار الدولة", callback_data="btn_pull_country"))
         msg_txt = "📺 **Step 2: Select Video Quality:**\n(Ultra 4K costs +1 extra point)" if lang == 'en' else "📺 **الخطوة 2: اختر جودة الحساب:**\n(Ultra 4K تزيد نقطة إضافية)"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -1070,6 +1072,8 @@ def callback_queries(call):
             InlineKeyboardButton("🆕 تاريخ حديث بعد 2020 (0 Points extra)", callback_data="pull_a_NEW"),
             InlineKeyboardButton("⚡ أي تاريخ (0 Points extra)", callback_data="pull_a_ANY")
         )
+        saved_country = user_pull_sessions[user_id].get('country', 'ALL')
+        markup.add(InlineKeyboardButton("🔙 رجوع لاختيار الجودة", callback_data=f"pull_c_{saved_country}"))
         msg_txt = "📅 **Step 3: Select Account Age / Subscription Date:**\n(Accounts from 2020 or older cost +1 extra point)" if lang == 'en' else "📅 **الخطوة 3: اختر تاريخ الاشتراك (عمر الحساب):**\n(الحسابات القديمة 2020 وما قبلها تزيد نقطة إضافية)"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -1127,7 +1131,7 @@ def handle_documents(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🛑 Stop Scan" if lang == 'en' else "🛑 إيقاف الفحص", callback_data="stop_scan"))
         
-        msg_wait = bot.reply_to(message, "⏳ Downloading file and starting stable scan..." if lang == 'en' else "⏳ جاري تحميل الملف وبدء الفحص...", reply_markup=markup)
+        msg_wait = bot.reply_to(message, "⏳ **جاري تحميل الملف وبدء الفحص...**\n[░░░░░░░░░░] 0%", parse_mode='Markdown', reply_markup=markup)
         
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -1160,26 +1164,36 @@ def handle_documents(message):
             except:
                 pass
 
+        total_lines = len(all_lines)
         db = load_db()
-        db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + len(all_lines)
+        db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + total_lines
         save_db(db)
         
-        increment_user_stats(user_id, checked=len(all_lines))
+        increment_user_stats(user_id, checked=total_lines)
 
         valid_count = 0
+        dead_count = 0
+        checked_so_far = 0
+
         valid_accounts_text = "========================================\n"
         valid_accounts_text += f"NETFLIX VALID ACCOUNTS REPORT - Dev: {OWNER_CREDIT}\n"
         valid_accounts_text += "========================================\n\n"
         netscape_text = "# Netscape HTTP Cookie File\n\n"
 
+        lock = threading.Lock()
+
         def process_line(line):
+            nonlocal checked_so_far, valid_count, dead_count
             if stop_event.is_set():
                 return None
             try:
                 parsed = extract_netflix_id(line)
                 if not parsed:
+                    with lock:
+                        checked_so_far += 1
+                        dead_count += 1
                     return None
-                time.sleep(0.3)
+                time.sleep(0.2)
                 account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
                 if stop_event.is_set():
                     return None
@@ -1189,10 +1203,52 @@ def handle_documents(message):
                     if token_result.get('status') == 'Success':
                         account_info['token_result'] = token_result
                         add_account_to_db(account_info)
+                        with lock:
+                            checked_so_far += 1
+                            valid_count += 1
                         return account_info
+                
+                with lock:
+                    checked_so_far += 1
+                    dead_count += 1
             except Exception as e:
                 logger.error(f"Error: {e}")
+                with lock:
+                    checked_so_far += 1
+                    dead_count += 1
             return None
+
+        # تحديث شريط التقدم دورياً في الخلفية
+        def update_progress_bar():
+            last_text = ""
+            while checked_so_far < total_lines and not stop_event.is_set():
+                time.sleep(2)
+                with lock:
+                    curr_checked = checked_so_far
+                    curr_valid = valid_count
+                    curr_dead = dead_count
+                
+                pct = int((curr_checked / total_lines) * 100) if total_lines > 0 else 0
+                filled = int(pct / 10)
+                bar = "█" * filled + "░" * (10 - filled)
+
+                status_str = (
+                    f"⏳ **جاري الفحص والتحميل...**\n"
+                    f"[{bar}] `{pct}%`\n\n"
+                    f"📊 إجمالي الحسابات: `{total_lines}`\n"
+                    f"🔍 تم فحصها: `{curr_checked}`\n"
+                    f"✅ الصالحة (Working): `{curr_valid}`\n"
+                    f"❌ التالفة (Dead): `{curr_dead}`"
+                )
+                if status_str != last_text:
+                    try:
+                        bot.edit_message_text(status_str, message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
+                        last_text = status_str
+                    except:
+                        pass
+
+        progress_thread = threading.Thread(target=update_progress_bar, daemon=True)
+        progress_thread.start()
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(process_line, line.strip()) for line in all_lines if line.strip()]
@@ -1202,7 +1258,6 @@ def handle_documents(message):
                 try:
                     acc = future.result()
                     if acc:
-                        valid_count += 1
                         email = acc['email'].replace(chr(92) + 'x40', '@')
                         plan = acc['plan']
                         country_full = get_country_name(acc['country'], lang)
@@ -1222,7 +1277,7 @@ def handle_documents(message):
                             res_msg += f"📦 Plan: `{plan}`\n"
                             res_msg += f"💰 Price: `{price}`\n"
                             res_msg += f"📺 Quality: `{quality}`\n"
-                            res_msg += f"📅 Member Since: `{member_since}`\n"
+                            res_msg += f"📅 Member Since (Age): `{member_since}`\n"
                             res_msg += f"🔄 Next Billing: `{expiry}`\n"
                             res_msg += f"👥 Profiles: `{profiles}`\n"
                             res_msg += f"📧 Email: `{email}`\n"
@@ -1233,7 +1288,7 @@ def handle_documents(message):
                             res_msg += f"📦 الباقة: `{plan}`\n"
                             res_msg += f"💰 السعر: `{price}`\n"
                             res_msg += f"📺 الجودة: `{quality}`\n"
-                            res_msg += f"📅 تاريخ الاشتراك: `{member_since}`\n"
+                            res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{member_since}`\n"
                             res_msg += f"🔄 تاريخ التجديد: `{expiry}`\n"
                             res_msg += f"👥 البروفايلات: `{profiles}`\n"
                             res_msg += f"📧 البريد: `{email}`\n"
@@ -1246,7 +1301,7 @@ def handle_documents(message):
                 except Exception as ex:
                     logger.error(f"Error: {ex}")
 
-        final_text = f"✅ Scan completed. Saved ({valid_count}) working accounts." if lang == 'en' else f"✅ انتهى الفحص. تم العثور على وحفظ ({valid_count}) حساب."
+        final_text = f"✅ Scan completed. Found and saved ({valid_count}) working accounts. (Dead: {dead_count})" if lang == 'en' else f"✅ انتهى الفحص بنجاح.\nتم العثور وحفظ ({valid_count}) حساب شغال.\n❌ الحسابات التالفة: {dead_count}"
         try:
             bot.edit_message_text(final_text, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
         except:
@@ -1312,7 +1367,7 @@ def handle_text_message(message):
                 res_msg += f"📦 Plan: `{account_info['plan']}`\n"
                 res_msg += f"💰 Price: `{account_info['plan_price']}`\n"
                 res_msg += f"📺 Quality: `{account_info['video_quality']}`\n"
-                res_msg += f"📅 Member Since: `{account_info['member_since']}`\n"
+                res_msg += f"📅 Member Since (Age): `{account_info['member_since']}`\n"
                 res_msg += f"🔄 Next Billing: `{account_info['next_billing']}`\n"
                 res_msg += f"👥 Profiles: `{account_info['profiles']}`\n"
                 res_msg += f"📧 Email: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
@@ -1323,7 +1378,7 @@ def handle_text_message(message):
                 res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
                 res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
                 res_msg += f"📺 الجودة: `{account_info['video_quality']}`\n"
-                res_msg += f"📅 تاريخ الاشتراك: `{account_info['member_since']}`\n"
+                res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{account_info['member_since']}`\n"
                 res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
                 res_msg += f"👥 البروفايلات: `{account_info['profiles']}`\n"
                 res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
