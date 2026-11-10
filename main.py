@@ -691,10 +691,12 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
         bot.send_message(chat_id, err_msg)
         return
 
+    # إرسال رسالة انتظار للمستخدم فوراً حتى لا يشعر أن البوت لا يرد
+    msg_wait = bot.send_message(chat_id, "⏳ جاري اختيار الحساب وتوليد رابط الدخول..." if lang == 'en' else "⏳ جاري اختيار الحساب وتوليد رابط الدخول...")
+
     selected_account = None
     token_result = None
 
-    # تصفية دقيقة ومضمونة حسب الدولة أو جلب عشوائي (ALL)
     filtered_accounts = []
     for acc in accounts:
         acc_country = str(acc.get('country', '')).strip().upper()
@@ -706,14 +708,15 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
 
     if not filtered_accounts and requested_country and requested_country != "ALL":
         no_country_msg = f"❌ Sorry, no active accounts available right now for country ({requested_country}). Try 'ALL countries'." if lang == 'en' else f"❌ عذراً، لا توجد حسابات صالحة حالياً للدولة ({requested_country}). جرب خيار (أي دولة)."
-        bot.send_message(chat_id, no_country_msg)
+        try:
+            bot.edit_message_text(no_country_msg, chat_id, msg_wait.message_id)
+        except:
+            bot.send_message(chat_id, no_country_msg)
         return
 
-    # إذا لم تتوفر حسابات أصلاً
     if not filtered_accounts:
         filtered_accounts = accounts
 
-    # تجربة الحسابات المتاحة وتوليد التوكن حتى يتم إيجاد حساب شغال تماماً
     for acc in filtered_accounts:
         netflix_id = acc['cookie'].get('NetflixId')
         t_res = generate_token(netflix_id)
@@ -722,7 +725,6 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             token_result = t_res
             break
 
-    # إذا فشل توليد التوكن لأول حساب، نأخذ أول حساب متاح ونرسله للمستخدم لضمان عدم توقف البوت
     if not selected_account or not token_result or token_result.get('status') != 'Success':
         if accounts:
             selected_account = accounts[0]
@@ -730,10 +732,12 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             token_result = generate_token(netflix_id)
         else:
             msg = "❌ Sorry, no active accounts available right now." if lang == 'en' else "❌ عذراً، لا توجد حسابات متاحة حالياً."
-            bot.send_message(chat_id, msg)
+            try:
+                bot.edit_message_text(msg, chat_id, msg_wait.message_id)
+            except:
+                bot.send_message(chat_id, msg)
             return
 
-    # خصم نقطة واحدة من رصيد المستخدم بنجاح
     update_user_points(user_id, -1)
     
     if "user_last_pull" not in db:
@@ -778,7 +782,10 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
         res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
         res_msg += f"\n\n👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
 
-    bot.send_message(chat_id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
+    try:
+        bot.edit_message_text(res_msg, chat_id, msg_wait.message_id, parse_mode='Markdown', disable_web_page_preview=True)
+    except:
+        bot.send_message(chat_id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
 
 def execute_replacement(chat_id, user_id):
     lang = user_languages.get(user_id, 'ar')
@@ -853,13 +860,15 @@ def callback_queries(call):
     data = call.data
     chat_id = call.message.chat.id
     
+    # الرد الفوري المضمون على الزر لجميع الأجهزة لمنع التعليق
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    
     if data.startswith("lang_"):
         lang = data.split("_")[1]
         user_languages[user_id] = lang
-        try:
-            bot.answer_callback_query(call.id)
-        except Exception:
-            pass
         try:
             points = get_user_data(user_id)["points"]
             if lang == 'en':
@@ -907,10 +916,6 @@ def callback_queries(call):
     elif data == "check_sub":
         lang = user_languages.get(user_id, 'ar')
         if check_subscription(user_id):
-            try:
-                bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
-            except:
-                pass
             show_main_menu(call.message.chat.id, user_id)
         else:
             try:
@@ -922,10 +927,6 @@ def callback_queries(call):
         lang = user_languages.get(user_id, 'ar')
         if user_id in active_scans:
             active_scans[user_id].set()
-            try:
-                bot.answer_callback_query(call.id, "🛑 Stopping scan..." if lang == 'en' else "🛑 جاري إيقاف عملية الفحص...")
-            except:
-                pass
         else:
             try:
                 bot.answer_callback_query(call.id, "⚠️ No active scan found." if lang == 'en' else "⚠️ لا توجد عملية فحص نشطة حالياً.")
@@ -933,10 +934,6 @@ def callback_queries(call):
                 pass
             
     elif data == "btn_pull_menu":
-        try:
-            bot.answer_callback_query(call.id)
-        except:
-            pass
         lang = user_languages.get(user_id, 'ar')
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
@@ -952,26 +949,14 @@ def callback_queries(call):
         bot.send_message(call.message.chat.id, msg_txt, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_"):
-        try:
-            bot.answer_callback_query(call.id)
-        except:
-            pass
         country_code = data.split("_")[1]
         execute_pull_account(call.message.chat.id, user_id, country_code)
 
     elif data == "btn_replace":
-        try:
-            bot.answer_callback_query(call.id)
-        except:
-            pass
         execute_replacement(call.message.chat.id, user_id)
 
     elif data == "btn_recharge":
         lang = user_languages.get(user_id, 'ar')
-        try:
-            bot.answer_callback_query(call.id)
-        except:
-            pass
         msg = (
             f"💳 **Recharge Points:**\n\n"
             f"1️⃣ Send your recharge code (e.g., `NETFLIX-XXXX`) directly in chat.\n"
@@ -991,10 +976,6 @@ def callback_queries(call):
             except:
                 pass
             return
-        try:
-            bot.answer_callback_query(call.id)
-        except:
-            pass
         db = load_db()
         total_users = len(db.get("users", {}))
         total_valid = len(db.get("accounts", []))
@@ -1011,7 +992,7 @@ def callback_queries(call):
             f"👥 إجمالي المستخدمين: `{total_users}`\n"
             f"🔍 إجمالي الحسابات المفحوصة: `{total_checked}`\n"
             f"💾 الحسابات الشغالة في الذاكرة: `{total_valid}`\n"
-            f"👨‍💻 المطور: `{OWNER_CREDIT}]({OWNER_LINK})\n"
+            f"👨‍💻 المطور: [{OWNER_CREDIT}]({OWNER_LINK})\n"
         )
         bot.send_message(call.message.chat.id, stats_msg, parse_mode='Markdown', disable_web_page_preview=True)
 
