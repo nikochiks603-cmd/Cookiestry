@@ -148,6 +148,23 @@ def check_subscription(user_id):
         logger.error(f"Error checking subscription: {e}")
     return False
 
+def send_sub_required_message(target_obj, lang='ar'):
+    markup = InlineKeyboardMarkup()
+    chat_id = target_obj.chat.id if hasattr(target_obj, 'chat') else target_obj
+    if lang == 'en':
+        markup.add(InlineKeyboardButton("📢 Subscribe to Channel", url=CHANNEL_LINK))
+        markup.add(InlineKeyboardButton("🔄 Verify Subscription", callback_data="check_sub"))
+        text = "⚠️ **Sorry, you must subscribe to the bot's channel first to use it!**\n\nAfter subscribing, click the verify button below."
+    else:
+        markup.add(InlineKeyboardButton("📢 اشترك في القناة هنا", url=CHANNEL_LINK))
+        markup.add(InlineKeyboardButton("🔄 تحقق من الاشتراك", callback_data="check_sub"))
+        text = "⚠️ **عذراً، يجب عليك الاشتراك في قناة البوت أولاً لتتمكن من استخدامه!**\n\nبعد الاشتراك، اضغط على زر التحقق أدناه."
+    
+    try:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='Markdown')
+    except:
+        pass
+
 def unescape_plan(s):
     try:
         return codecs.decode(s, 'unicode_escape')
@@ -419,23 +436,18 @@ def extract_zip_and_get_files(zip_path, extract_dir):
         logger.error(f"Error extracting ZIP file: {e}")
         return []
 
-def send_sub_required_message(message, lang='ar'):
-    markup = InlineKeyboardMarkup()
-    if lang == 'en':
-        markup.add(InlineKeyboardButton("📢 Subscribe to Channel", url=CHANNEL_LINK))
-        markup.add(InlineKeyboardButton("🔄 Verify Subscription", callback_data="check_sub"))
-        bot.reply_to(message, "⚠️ **Sorry, you must subscribe to the bot's channel first to use it!**\n\nAfter subscribing, click the verify button below.", reply_markup=markup, parse_mode='Markdown')
-    else:
-        markup.add(InlineKeyboardButton("📢 اشترك في القناة هنا", url=CHANNEL_LINK))
-        markup.add(InlineKeyboardButton("🔄 تحقق من الاشتراك", callback_data="check_sub"))
-        bot.reply_to(message, "⚠️ **عذراً، يجب عليك الاشتراك في قناة البوت أولاً لتتمكن من استخدامه!**\n\nبعد الاشتراك، اضغط على زر التحقق أدناه.", reply_markup=markup, parse_mode='Markdown')
-
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     if user_data.get("banned", False):
         bot.reply_to(message, "❌ You are banned from using this bot." if user_languages.get(user_id) == 'en' else "❌ أنت محظور من استخدام هذا البوت.")
+        return
+
+    # فحص الاشتراك الإجباري عند البدء
+    if not check_subscription(user_id):
+        lang = user_languages.get(user_id, 'ar')
+        send_sub_required_message(message, lang)
         return
 
     markup = InlineKeyboardMarkup(row_width=2)
@@ -504,6 +516,9 @@ def show_main_menu(chat_id, user_id):
 def cmd_id(message):
     user_id = message.from_user.id
     lang = user_languages.get(user_id, 'ar')
+    if not check_subscription(user_id):
+        send_sub_required_message(message, lang)
+        return
     if lang == 'en':
         bot.reply_to(message, f"🆔 **Your Telegram ID:** `{user_id}`\nSend this ID to the developer [{OWNER_CREDIT}]({OWNER_LINK}) to recharge points.", parse_mode='Markdown', disable_web_page_preview=True)
     else:
@@ -691,7 +706,6 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
         bot.send_message(chat_id, err_msg)
         return
 
-    # إرسال رسالة انتظار للمستخدم فوراً حتى لا يشعر أن البوت لا يرد
     msg_wait = bot.send_message(chat_id, "⏳ جاري اختيار الحساب وتوليد رابط الدخول..." if lang == 'en' else "⏳ جاري اختيار الحساب وتوليد رابط الدخول...")
 
     selected_account = None
@@ -836,14 +850,20 @@ def execute_replacement(chat_id, user_id):
 
 @bot.message_handler(commands=['pull', 'getaccount'])
 def pull_account_command(message):
+    if not check_subscription(message.from_user.id):
+        send_sub_required_message(message, user_languages.get(message.from_user.id, 'ar'))
+        return
     execute_pull_account(message.chat.id, message.from_user.id)
 
 @bot.message_handler(func=lambda message: message.text and message.text.startswith("NETFLIX-"))
 def redeem_key_handler(message):
     user_id = message.from_user.id
     lang = user_languages.get(user_id, 'ar')
+    if not check_subscription(user_id):
+        send_sub_required_message(message, lang)
+        return
+
     key = message.text.strip()
-    
     db = load_db()
     if key in db["redeem_codes"]:
         points = db["redeem_codes"][key]
@@ -859,19 +879,24 @@ def callback_queries(call):
     user_id = call.from_user.id
     data = call.data
     chat_id = call.message.chat.id
+    lang = user_languages.get(user_id, 'ar')
     
-    # الرد الفوري المضمون على الزر لجميع الأجهزة لمنع التعليق
     try:
         bot.answer_callback_query(call.id)
     except Exception:
         pass
+
+    # فحص الاشتراك الإجباري للقدامى والجدد عند الضغط على أي زر
+    if data != "check_sub" and not check_subscription(user_id):
+        send_sub_required_message(call.message, lang)
+        return
     
     if data.startswith("lang_"):
-        lang = data.split("_")[1]
-        user_languages[user_id] = lang
+        new_lang = data.split("_")[1]
+        user_languages[user_id] = new_lang
         try:
             points = get_user_data(user_id)["points"]
-            if lang == 'en':
+            if new_lang == 'en':
                 welcome_text = (
                     f"🎬 **Welcome to the Advanced Netflix Cookie Checker Bot!**\n\n"
                     f"💰 Your Points: `{points}` 🪙\n"
@@ -914,9 +939,12 @@ def callback_queries(call):
         return
         
     elif data == "check_sub":
-        lang = user_languages.get(user_id, 'ar')
         if check_subscription(user_id):
-            show_main_menu(call.message.chat.id, user_id)
+            try:
+                bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
+            except:
+                pass
+            show_main_menu(chat_id, user_id)
         else:
             try:
                 bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
@@ -924,7 +952,6 @@ def callback_queries(call):
                 pass
             
     elif data == "stop_scan":
-        lang = user_languages.get(user_id, 'ar')
         if user_id in active_scans:
             active_scans[user_id].set()
         else:
@@ -934,7 +961,9 @@ def callback_queries(call):
                 pass
             
     elif data == "btn_pull_menu":
-        lang = user_languages.get(user_id, 'ar')
+        if not check_subscription(user_id):
+            send_sub_required_message(call.message, lang)
+            return
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("🌐 أي دولة (عشوائي)", callback_data="pull_ALL"),
@@ -946,17 +975,25 @@ def callback_queries(call):
             InlineKeyboardButton("🇸🇦 السعودية (SA)", callback_data="pull_SA")
         )
         msg_txt = "🌍 **Select the country you want to pull from:**" if lang == 'en' else "🌍 **اختر الدولة التي تريد سحب حساب منها:**"
-        bot.send_message(call.message.chat.id, msg_txt, reply_markup=markup, parse_mode='Markdown')
+        bot.send_message(chat_id, msg_txt, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_"):
+        if not check_subscription(user_id):
+            send_sub_required_message(call.message, lang)
+            return
         country_code = data.split("_")[1]
-        execute_pull_account(call.message.chat.id, user_id, country_code)
+        execute_pull_account(chat_id, user_id, country_code)
 
     elif data == "btn_replace":
-        execute_replacement(call.message.chat.id, user_id)
+        if not check_subscription(user_id):
+            send_sub_required_message(call.message, lang)
+            return
+        execute_replacement(chat_id, user_id)
 
     elif data == "btn_recharge":
-        lang = user_languages.get(user_id, 'ar')
+        if not check_subscription(user_id):
+            send_sub_required_message(call.message, lang)
+            return
         msg = (
             f"💳 **Recharge Points:**\n\n"
             f"1️⃣ Send your recharge code (e.g., `NETFLIX-XXXX`) directly in chat.\n"
@@ -966,15 +1003,10 @@ def callback_queries(call):
             f"1️⃣ أرسل كود الشحن (مثال: `NETFLIX-XXXX`) مباشرة هنا في الشات.\n"
             f"2️⃣ أرسل معرفك `/id` للمطور [{OWNER_CREDIT}]({OWNER_LINK}) لإضافة النقاط."
         )
-        bot.send_message(call.message.chat.id, msg, parse_mode='Markdown', disable_web_page_preview=True)
+        bot.send_message(chat_id, msg, parse_mode='Markdown', disable_web_page_preview=True)
         
     elif data == "btn_admin":
-        lang = user_languages.get(user_id, 'ar')
         if user_id not in ADMIN_IDS:
-            try:
-                bot.answer_callback_query(call.id, "❌ Admin only!" if lang == 'en' else "❌ مخصص للأدمن فقط!", show_alert=True)
-            except:
-                pass
             return
         db = load_db()
         total_users = len(db.get("users", {}))
@@ -986,15 +1018,15 @@ def callback_queries(call):
             f"👥 Total Users: `{total_users}`\n"
             f"🔍 Total Checked Accounts: `{total_checked}`\n"
             f"💾 Working Accounts in Memory: `{total_valid}`\n"
-            f"👨‍💻 Developer: [{OWNER_CREDIT}]({OWNER_LINK})\n"
+            f"👨‍💻 Developer: `{OWNER_CREDIT}`\n"
         ) if lang == 'en' else (
             "📊 **لوحة إحصائيات الأدمن:**\n\n"
             f"👥 إجمالي المستخدمين: `{total_users}`\n"
             f"🔍 إجمالي الحسابات المفحوصة: `{total_checked}`\n"
             f"💾 الحسابات الشغالة في الذاكرة: `{total_valid}`\n"
-            f"👨‍💻 المطور: [{OWNER_CREDIT}]({OWNER_LINK})\n"
+            f"👨‍💻 المطور: `{OWNER_CREDIT}`\n"
         )
-        bot.send_message(call.message.chat.id, stats_msg, parse_mode='Markdown', disable_web_page_preview=True)
+        bot.send_message(chat_id, stats_msg, parse_mode='Markdown', disable_web_page_preview=True)
 
 @bot.message_handler(content_types=['document'])
 def handle_documents(message):
