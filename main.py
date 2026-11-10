@@ -17,38 +17,28 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from telebot import apihelper
 
-# زيادة مهلة الاتصال الخاصة بـ pyTelegramBotAPI لمنع مشاكل الـ Timeout
 apihelper.CONNECT_TIMEOUT = 60
 apihelper.READ_TIMEOUT = 60
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Developer & Owner credit with direct link
 OWNER_CREDIT = "@farxxes"
 OWNER_LINK = "https://t.me/farxxes"
 
-# إعدادات بوت التليجرام
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHSmYKJKxM')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ضع آيدي الأدمن الخاص بك هنا
-ADMIN_IDS = [8713916851] # <--- قم بتغيير الرقم إلى آيدي حسابك الحقيقي
-
-# إعدادات الاشتراك الإجباري لقناتك
+ADMIN_IDS = [8713916851] # ضع آيدي الأدمن هنا
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
 CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 
-# ملف الذاكرة لحفظ الحسابات، المستخدمين، والنقاط
 DB_FILE = 'database.json'
 db_lock = threading.Lock()
 
-# قاموس لتتبع عمليات الفحص واللغات
 active_scans = {}
-user_languages = {} # حفظ لغة المستخدم (ar / en)
+user_languages = {}
 
-# قاموس شامل لأعلام وأسماء معظم دول العالم (عربي / إنجليزي)
 COUNTRY_DATA = {
     'US': {'ar': '🇺🇸 الولايات المتحدة', 'en': '🇺🇸 United States'},
     'FR': {'ar': '🇫🇷 فرنسا', 'en': '🇫🇷 France'},
@@ -132,6 +122,8 @@ def update_user_points(user_id, amount):
         save_db(db)
 
 def add_account_to_db(account_info):
+    if account_info.get('on_payment_hold') == 'Yes':
+        return False
     db = load_db()
     netflix_id = account_info['cookie'].get('NetflixId')
     exists = any(acc['cookie'].get('NetflixId') == netflix_id or (acc.get('email') != 'Unknown' and acc.get('email') == account_info.get('email')) for acc in db['accounts'])
@@ -505,6 +497,43 @@ def show_main_menu(chat_id, user_id):
 
     bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='Markdown', disable_web_page_preview=True)
 
+@bot.message_handler(commands=['id'])
+def cmd_id(message):
+    user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    if lang == 'en':
+        bot.reply_to(message, f"🆔 **Your Telegram ID:** `{user_id}`\nSend this ID to the developer [{OWNER_CREDIT}]({OWNER_LINK}) to recharge points.", parse_mode='Markdown', disable_web_page_preview=True)
+    else:
+        bot.reply_to(message, f"🆔 **معرف الحساب (ID) الخاص بك:** `{user_id}`\nأرسل هذا المعرف للمطور [{OWNER_CREDIT}]({OWNER_LINK}) لإضافة النقاط.", parse_mode='Markdown', disable_web_page_preview=True)
+
+@bot.message_handler(commands=['broadcast'])
+def cmd_broadcast(message):
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        return
+    
+    text_to_broadcast = message.text.replace('/broadcast', '').strip()
+    if not text_to_broadcast:
+        bot.reply_to(message, "❌ Please write the message after the command.\nExample: `/broadcast Hello users!`", parse_mode='Markdown')
+        return
+
+    db = load_db()
+    users = db.get("users", {})
+    success_count = 0
+    fail_count = 0
+
+    msg_wait = bot.reply_to(message, "📢 Broadcasting message to all users...")
+
+    for uid in users.keys():
+        try:
+            bot.send_message(int(uid), text_to_broadcast, parse_mode='Markdown', disable_web_page_preview=True)
+            success_count += 1
+            time.sleep(0.1)
+        except:
+            fail_count += 1
+
+    bot.edit_message_text(f"✅ **Broadcast Completed!**\n📤 Successfully sent: `{success_count}`\n❌ Failed: `{fail_count}`", message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+
 @bot.message_handler(commands=['stats', 'admin'])
 def admin_panel_command(message):
     user_id = message.from_user.id
@@ -526,9 +555,10 @@ def admin_panel_command(message):
         f"💾 Working Accounts in Memory: `{total_valid}`\n"
         f"👨‍💻 Developer: [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
         "💡 *Admin Commands:* \n"
-        "`/addpoints [user_id] [amount]` - إضافة نقاط\n"
+        "`/addpoints [id] [amount]` - إضافة نقاط\n"
+        "`/broadcast [text]` - إرسال إعلان للكل\n"
         "`/cleanmem` - تنظيف الذاكرة وحذف الحسابات التالفة\n"
-        "`/ban [user_id]` - حظر مستخدم\n"
+        "`/ban [id]` - حظر مستخدم\n"
         "`/genkey [points]` - إنشاء كود شحن"
     )
     bot.reply_to(message, stats_msg, parse_mode='Markdown', disable_web_page_preview=True)
@@ -540,7 +570,7 @@ def cmd_cleanmem(message):
     if user_id not in ADMIN_IDS:
         return
     
-    msg_wait = bot.reply_to(message, "🧹 Cleaning memory... Re-checking all stored accounts." if lang == 'en' else "🧹 جاري تنظيف الذاكرة وإعادة فحص الحسابات المخزنة...")
+    msg_wait = bot.reply_to(message, "🧹 Cleaning memory... Re-checking all stored accounts." if lang == 'en' else "🧹 جاري تنظيف الذاكرة وإعادة فحص الحسابات وحذف التالفة التي تعذر استخراج روابطها...")
     
     db = load_db()
     accounts = db.get("accounts", [])
@@ -550,8 +580,13 @@ def cmd_cleanmem(message):
     for acc in accounts:
         netflix_id = acc['cookie'].get('NetflixId')
         check = check_netflix_cookie({"NetflixId": netflix_id})
-        if check["ok"] and check.get('plan') != "Unknown":
-            valid_accounts.append(acc)
+        # التحقق أيضاً من إمكانية توليد التوكن لتجنب الحسابات التي تعذر استخراج رابطها
+        if check["ok"] and check.get('plan') != "Unknown" and check.get('on_payment_hold') != 'Yes':
+            token_res = generate_token(netflix_id)
+            if token_res.get('status') == 'Success':
+                valid_accounts.append(acc)
+            else:
+                removed_count += 1
         else:
             removed_count += 1
 
@@ -559,7 +594,35 @@ def cmd_cleanmem(message):
     db["stats"]["valid"] = len(valid_accounts)
     save_db(db)
 
-    bot.edit_message_text(f"✅ Memory cleaned successfully!\n🗑️ Removed dead accounts: `{removed_count}`\n💾 Remaining active accounts: `{len(valid_accounts)}`" if lang == 'en' else f"✅ تم تنظيف الذاكرة بنجاح!\n🗑️ الحسابات التالفة المحذوفة: `{removed_count}`\n💾 الحسابات الشغالة المتبقية: `{len(valid_accounts)}`", message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+    bot.edit_message_text(f"✅ Memory cleaned successfully!\n🗑️ Removed dead/unusable accounts: `{removed_count}`\n💾 Remaining active accounts: `{len(valid_accounts)}`" if lang == 'en' else f"✅ تم تنظيف الذاكرة بنجاح!\n🗑️ الحسابات التالفة أو التي تعذر توليد روابطها: `{removed_count}`\n💾 الحسابات الشغالة المتبقية: `{len(valid_accounts)}`", message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+
+def background_auto_cleaner():
+    while True:
+        time.sleep(3600)
+        try:
+            db = load_db()
+            accounts = db.get("accounts", [])
+            if not accounts:
+                continue
+            
+            valid_accounts = []
+            for acc in accounts:
+                netflix_id = acc['cookie'].get('NetflixId')
+                check = check_netflix_cookie({"NetflixId": netflix_id})
+                if check["ok"] and check.get('plan') != "Unknown" and check.get('on_payment_hold') != 'Yes':
+                    token_res = generate_token(netflix_id)
+                    if token_res.get('status') == 'Success':
+                        valid_accounts.append(acc)
+                time.sleep(1)
+            
+            db["accounts"] = valid_accounts
+            db["stats"]["valid"] = len(valid_accounts)
+            save_db(db)
+            logger.info(f"Auto-cleaner finished. Active accounts in memory: {len(valid_accounts)}")
+        except Exception as e:
+            logger.error(f"Error in background_auto_cleaner: {e}")
+
+threading.Thread(target=background_auto_cleaner, daemon=True).start()
 
 @bot.message_handler(commands=['addpoints'])
 def cmd_addpoints(message):
@@ -626,76 +689,92 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
         bot.send_message(chat_id, err_msg)
         return
 
+    # محاولة سحب حساب وتوليد رابطه، وإذا فشل توليد الرابط (انتهت صلاحيته)، نحذفه ونبحث عن غيره تلقائياً
+    selected_account = None
     selected_index = -1
-    if requested_country and requested_country != "ALL":
-        for idx, acc in enumerate(accounts):
-            if acc.get('country', '').upper() == requested_country.upper():
-                selected_index = idx
-                break
-        if selected_index == -1:
-            msg = f"❌ No available accounts found for country: {requested_country}" if lang == 'en' else f"❌ عذراً، لا توجد حسابات متوفرة حالياً للدولة المطلوبة: {requested_country}"
+    token_result = None
+
+    for idx, acc in enumerate(accounts):
+        if requested_country and requested_country != "ALL":
+            if acc.get('country', '').upper() != requested_country.upper():
+                continue
+        
+        netflix_id = acc['cookie'].get('NetflixId')
+        t_res = generate_token(netflix_id)
+        if t_res.get('status') == 'Success':
+            selected_account = acc
+            selected_index = idx
+            token_result = t_res
+            break
+        else:
+            # الحساب تعذر توليد رابطه، سنقوم بحذفه من الذاكرة فوراً لئلا يظهر مرة أخرى
+            accounts.pop(idx)
+            db["accounts"] = accounts
+            db["stats"]["valid"] = len(accounts)
+            save_db(db)
+            # إعادة تحميل الذاكرة لتفادي مشاكل الـ Index
+            db = load_db()
+            accounts = db.get("accounts", [])
+            break # الخروج وإعادة المحاولة أو إعلام المستخدم
+
+    if not selected_account or not token_result or token_result.get('status') != 'Success':
+        # محاولة أخيرة إذا وجد حسابات
+        if accounts:
+            acc = accounts.pop(0)
+            netflix_id = acc['cookie'].get('NetflixId')
+            token_result = generate_token(netflix_id)
+            selected_account = acc
+            db["accounts"] = accounts
+            db["stats"]["valid"] = len(accounts)
+            save_db(db)
+        else:
+            msg = "❌ Sorry, no active accounts available right now. Please try again later or upload new files!" if lang == 'en' else "❌ عذراً، لا توجد حسابات صالحة أو متاحة حالياً. يرجى المحاولة لاحقاً أو رفع ملفات جديدة!"
             bot.send_message(chat_id, msg)
             return
-        acc = accounts.pop(selected_index)
-    else:
-        acc = accounts.pop(0)
 
-    # خصم نقطة واحدة من رصيد المستخدم فوراً
     update_user_points(user_id, -1)
-    db["accounts"] = accounts
     
     if "user_last_pull" not in db:
         db["user_last_pull"] = {}
-    db["user_last_pull"][str(user_id)] = acc
+    db["user_last_pull"][str(user_id)] = selected_account
     save_db(db)
 
     wait_text = "⏳ Pulling account and generating fresh direct login link..." if lang == 'en' else "⏳ جاري سحب الحساب وتوليد رابط دخول طازج وفعال..."
     msg_wait = bot.send_message(chat_id, wait_text)
 
-    netflix_id = acc['cookie'].get('NetflixId')
-    token_result = generate_token(netflix_id)
-
-    country_full = get_country_name(acc['country'], lang)
-    email = acc['email'].replace(chr(92) + 'x40', '@')
-    hold_status = "⚠️ On Hold" if acc['on_payment_hold'] == 'Yes' else ("✅ Active" if lang == 'en' else "✅ نشط تماماً")
+    country_full = get_country_name(selected_account['country'], lang)
+    email = selected_account['email'].replace(chr(92) + 'x40', '@')
+    hold_status = "✅ Active" if lang == 'en' else "✅ نشط تماماً"
 
     if lang == 'en':
         res_msg = "🎬 **NETFLIX Account Pulled from Memory** 🎬\n\n"
         res_msg += f"🌍 Country: `{country_full}`\n"
-        res_msg += f"📦 Plan: `{acc['plan']}`\n"
-        res_msg += f"💰 Price: `{acc['plan_price']}`\n"
-        res_msg += f"📺 Quality: `{acc['video_quality']}` | Streams: `{acc['max_streams']}`\n"
+        res_msg += f"📦 Plan: `{selected_account['plan']}`\n"
+        res_msg += f"💰 Price: `{selected_account['plan_price']}`\n"
+        res_msg += f"📺 Quality: `{selected_account['video_quality']}` | Streams: `{selected_account['max_streams']}`\n"
         res_msg += f"💳 Status: `{hold_status}`\n"
-        res_msg += f"📅 Member Since: `{acc['member_since']}`\n"
-        res_msg += f"🔄 Next Billing: `{acc['next_billing']}`\n"
-        res_msg += f"👥 Profiles: `{acc['profiles']}`\n"
+        res_msg += f"📅 Member Since: `{selected_account['member_since']}`\n"
+        res_msg += f"🔄 Next Billing: `{selected_account['next_billing']}`\n"
+        res_msg += f"👥 Profiles: `{selected_account['profiles']}`\n"
         res_msg += f"📧 Email: `{email}`\n"
         
-        if token_result.get('status') == 'Success':
-            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-            res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
-        else:
-            res_msg += f"\n⚠️ **Failed to generate fresh link.**"
-        
+        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result.get('token', '')}")
+        res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
         res_msg += f"\n\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
     else:
         res_msg = "🎬 **حساب NETFLIX مسحوب من الذاكرة** 🎬\n\n"
         res_msg += f"🌍 البلد: `{country_full}`\n"
-        res_msg += f"📦 الباقة: `{acc['plan']}`\n"
-        res_msg += f"💰 السعر: `{acc['plan_price']}`\n"
-        res_msg += f"📺 الجودة: `{acc['video_quality']}` | الشاشات: `{acc['max_streams']}`\n"
+        res_msg += f"📦 الباقة: `{selected_account['plan']}`\n"
+        res_msg += f"💰 السعر: `{selected_account['plan_price']}`\n"
+        res_msg += f"📺 الجودة: `{selected_account['video_quality']}` | الشاشات: `{selected_account['max_streams']}`\n"
         res_msg += f"💳 حالة الحساب: `{hold_status}`\n"
-        res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{acc['member_since']}`\n"
-        res_msg += f"🔄 تاريخ التجديد: `{acc['next_billing']}`\n"
-        res_msg += f"👥 البروفايلات: `{acc['profiles']}`\n"
+        res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{selected_account['member_since']}`\n"
+        res_msg += f"🔄 تاريخ التجديد: `{selected_account['next_billing']}`\n"
+        res_msg += f"👥 البروفايلات: `{selected_account['profiles']}`\n"
         res_msg += f"📧 البريد: `{email}`\n"
         
-        if token_result.get('status') == 'Success':
-            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
-            res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
-        else:
-            res_msg += f"\n⚠️ **فشل توليد رابط طازج.**"
-        
+        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result.get('token', '')}")
+        res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
         res_msg += f"\n\n👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
 
     try:
@@ -729,6 +808,7 @@ def execute_replacement(chat_id, user_id):
         if accounts:
             new_acc = accounts.pop(0)
             db["accounts"] = accounts
+            db["stats"]["valid"] = len(accounts)
             db["user_last_pull"][str_id] = new_acc
             save_db(db)
 
@@ -778,7 +858,10 @@ def callback_queries(call):
         lang = data.split("_")[1]
         user_languages[user_id] = lang
         msg_resp = "✅ Language set to English!" if lang == 'en' else "✅ تم اختيار اللغة العربية بنجاح!"
-        bot.answer_callback_query(call.id, msg_resp)
+        try:
+            bot.answer_callback_query(call.id, msg_resp)
+        except:
+            pass
         try:
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
@@ -788,25 +871,40 @@ def callback_queries(call):
     elif data == "check_sub":
         lang = user_languages.get(user_id, 'ar')
         if check_subscription(user_id):
-            bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
+            try:
+                bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
+            except:
+                pass
             try:
                 bot.delete_message(call.message.chat.id, call.message.message_id)
             except:
                 pass
             show_main_menu(call.message.chat.id, user_id)
         else:
-            bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
+            except:
+                pass
             
     elif data == "stop_scan":
         lang = user_languages.get(user_id, 'ar')
         if user_id in active_scans:
             active_scans[user_id].set()
-            bot.answer_callback_query(call.id, "🛑 Stopping scan..." if lang == 'en' else "🛑 جاري إيقاف عملية الفحص...")
+            try:
+                bot.answer_callback_query(call.id, "🛑 Stopping scan..." if lang == 'en' else "🛑 جاري إيقاف عملية الفحص...")
+            except:
+                pass
         else:
-            bot.answer_callback_query(call.id, "⚠️ No active scan found." if lang == 'en' else "⚠️ لا توجد عملية فحص نشطة حالياً.")
+            try:
+                bot.answer_callback_query(call.id, "⚠️ No active scan found." if lang == 'en' else "⚠️ لا توجد عملية فحص نشطة حالياً.")
+            except:
+                pass
             
     elif data == "btn_pull_menu":
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except:
+            pass
         lang = user_languages.get(user_id, 'ar')
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
@@ -822,35 +920,50 @@ def callback_queries(call):
         bot.send_message(call.message.chat.id, msg_txt, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_"):
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except:
+            pass
         country_code = data.split("_")[1]
         execute_pull_account(call.message.chat.id, user_id, country_code)
 
     elif data == "btn_replace":
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except:
+            pass
         execute_replacement(call.message.chat.id, user_id)
 
     elif data == "btn_recharge":
         lang = user_languages.get(user_id, 'ar')
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except:
+            pass
         ref_link = f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
         msg = (
             f"💳 **Recharge Points:**\n\n"
             f"1️⃣ Send your recharge code (e.g., `NETFLIX-XXXX`) directly in chat.\n"
-            f"2️⃣ Invite friends using your referral link to earn points:\n`{ref_link}`"
+            f"2️⃣ Send your ID (`/id`) to the developer [{OWNER_CREDIT}]({OWNER_LINK}) to add points."
         ) if lang == 'en' else (
             f"💳 **طريقة شحن النقاط:**\n\n"
             f"1️⃣ أرسل كود الشحن (مثال: `NETFLIX-XXXX`) مباشرة هنا في الشات.\n"
-            f"2️⃣ قم بدعوة أصدقائك عبر رابط الدعوة الخاص بك لكسب نقاط مجانية:\n`{ref_link}`"
+            f"2️⃣ أرسل معرفك `/id` للمطور [{OWNER_CREDIT}]({OWNER_LINK}) لإضافة النقاط."
         )
-        bot.send_message(call.message.chat.id, msg, parse_mode='Markdown')
+        bot.send_message(call.message.chat.id, msg, parse_mode='Markdown', disable_web_page_preview=True)
         
     elif data == "btn_admin":
         lang = user_languages.get(user_id, 'ar')
         if user_id not in ADMIN_IDS:
-            bot.answer_callback_query(call.id, "❌ Admin only!" if lang == 'en' else "❌ مخصص للأدمن فقط!", show_alert=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Admin only!" if lang == 'en' else "❌ مخصص للأدمن فقط!", show_alert=True)
+            except:
+                pass
             return
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except:
+            pass
         db = load_db()
         total_users = len(db.get("users", {}))
         total_valid = len(db.get("accounts", []))
@@ -948,11 +1061,12 @@ def handle_documents(message):
                 if stop_event.is_set():
                     return None
 
-                if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
+                if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown" and account_info.get('on_payment_hold') != 'Yes':
                     token_result = generate_token(parsed["value"])
-                    account_info['token_result'] = token_result
-                    add_account_to_db(account_info)
-                    return account_info
+                    if token_result.get('status') == 'Success':
+                        account_info['token_result'] = token_result
+                        add_account_to_db(account_info)
+                        return account_info
             except Exception as e:
                 logger.error(f"Error in process_line_with_token: {e}")
             return None
@@ -974,11 +1088,11 @@ def handle_documents(message):
                         profiles = acc['profiles']
                         price = acc['plan_price']
                         quality = acc['video_quality']
-                        hold_status = "⚠️ On Hold" if acc['on_payment_hold'] == 'Yes' else ("✅ Active" if lang == 'en' else "✅ نشط")
+                        hold_status = "✅ Active" if lang == 'en' else "✅ نشط"
                         
                         token_result = acc.get('token_result', {})
                         token_val = token_result.get('token', 'N/A')
-                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}") if token_result.get('status') == 'Success' else 'Failed to generate'
+                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
 
                         if lang == 'en':
                             res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
@@ -991,8 +1105,7 @@ def handle_documents(message):
                             res_msg += f"🔄 Next Billing: `{expiry}`\n"
                             res_msg += f"👥 Profiles: `{profiles}`\n"
                             res_msg += f"📧 Email: `{email}`\n"
-                            if token_result.get('status') == 'Success':
-                                res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
+                            res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
                             res_msg += f"\n\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
                         else:
                             res_msg = "🎬 حساب NETFLIX صالح وفعال 🎬\n\n"
@@ -1005,8 +1118,7 @@ def handle_documents(message):
                             res_msg += f"🔄 تاريخ التجديد: `{expiry}`\n"
                             res_msg += f"👥 البروفايلات: `{profiles}`\n"
                             res_msg += f"📧 البريد: `{email}`\n"
-                            if token_result.get('status') == 'Success':
-                                res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
+                            res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
                             res_msg += f"\n\n👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
                             
                         bot.send_message(message.chat.id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
@@ -1090,53 +1202,49 @@ def handle_text_message(message):
 
     account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
     
-    if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown":
+    if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown" and account_info.get('on_payment_hold') != 'Yes':
         token_result = generate_token(parsed["value"])
-        account_info['token_result'] = token_result
-        
-        add_account_to_db(account_info)
-        
-        country_full = get_country_name(account_info['country'], lang)
-        hold_status = "⚠️ On Hold" if account_info['on_payment_hold'] == 'Yes' else ("✅ Active" if lang == 'en' else "✅ نشط")
-        
-        if lang == 'en':
-            res_msg = "🎬 **Active NETFLIX Account / Checked** 🎬\n\n"
-            res_msg += f"🌍 Country: `{country_full}`\n"
-            res_msg += f"📦 Plan: `{account_info['plan']}`\n"
-            res_msg += f"💰 Price: `{account_info['plan_price']}`\n"
-            res_msg += f"📺 Quality: `{account_info['video_quality']}`\n"
-            res_msg += f"💳 Status: `{hold_status}`\n"
-            res_msg += f"📅 Member Since: `{account_info['member_since']}`\n"
-            res_msg += f"🔄 Next Billing: `{account_info['next_billing']}`\n"
-            res_msg += f"👥 Profiles: `{account_info['profiles']}`\n"
-            res_msg += f"📧 Email: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+        if token_result.get('status') == 'Success':
+            account_info['token_result'] = token_result
+            add_account_to_db(account_info)
             
-            if token_result.get('status') == 'Success':
-                mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+            country_full = get_country_name(account_info['country'], lang)
+            hold_status = "✅ Active" if lang == 'en' else "✅ نشط"
+            
+            if lang == 'en':
+                res_msg = "🎬 **Active NETFLIX Account / Checked** 🎬\n\n"
+                res_msg += f"🌍 Country: `{country_full}`\n"
+                res_msg += f"📦 Plan: `{account_info['plan']}`\n"
+                res_msg += f"💰 Price: `{account_info['plan_price']}`\n"
+                res_msg += f"📺 Quality: `{account_info['video_quality']}`\n"
+                res_msg += f"💳 Status: `{hold_status}`\n"
+                res_msg += f"📅 Member Since: `{account_info['member_since']}`\n"
+                res_msg += f"🔄 Next Billing: `{account_info['next_billing']}`\n"
+                res_msg += f"👥 Profiles: `{account_info['profiles']}`\n"
+                res_msg += f"📧 Email: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+                mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result.get('token', '')}")
                 res_msg += f"\n📱 Direct Login URL:\n`{mobile_url}`"
-                
-            res_msg += f"\n\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
-        else:
-            res_msg = "🎬 **نتيجة فحص الحساب / الرابط** 🎬\n\n"
-            res_msg += f"🌍 البلد: `{country_full}`\n"
-            res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
-            res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
-            res_msg += f"📺 الجودة: `{account_info['video_quality']}`\n"
-            res_msg += f"💳 الحالة: `{hold_status}`\n"
-            res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{account_info['member_since']}`\n"
-            res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
-            res_msg += f"👥 البروفايلات: `{account_info['profiles']}`\n"
-            res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
-            
-            if token_result.get('status') == 'Success':
-                mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result['token']}")
+                res_msg += f"\n\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
+            else:
+                res_msg = "🎬 **نتيجة فحص الحساب / الرابط** 🎬\n\n"
+                res_msg += f"🌍 البلد: `{country_full}`\n"
+                res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
+                res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
+                res_msg += f"📺 الجودة: `{account_info['video_quality']}`\n"
+                res_msg += f"💳 الحالة: `{hold_status}`\n"
+                res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{account_info['member_since']}`\n"
+                res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
+                res_msg += f"👥 البروفايلات: `{account_info['profiles']}`\n"
+                res_msg += f"📧 البريد: `{account_info['email'].replace(chr(92) + 'x40', '@')}`\n"
+                mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result.get('token', '')}")
                 res_msg += f"\n📱 رابط الدخول المباشر:\n`{mobile_url}`"
+                res_msg += f"\n\n👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
                 
-            res_msg += f"\n\n👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
-            
-        bot.edit_message_text(res_msg, message.chat.id, msg_wait.message_id, parse_mode='Markdown', disable_web_page_preview=True)
+            bot.edit_message_text(res_msg, message.chat.id, msg_wait.message_id, parse_mode='Markdown', disable_web_page_preview=True)
+        else:
+            bot.edit_message_text("❌ Account is active, but failed to generate a fresh direct login token." if lang == 'en' else "❌ الحساب شغال، ولكن تعذر توليد رابط دخول طازج له.", message.chat.id, msg_wait.message_id)
     else:
-        err_dead = "❌ This account or token is expired, dead, or invalid." if lang == 'en' else "❌ هذا الحساب أو الرابط منتهي الصلاحية أو غير شغال."
+        err_dead = "❌ This account or token is expired, dead, or on hold/invalid." if lang == 'en' else "❌ هذا الحساب أو الرابط منتهي الصلاحية، مجمد، أو غير صالح."
         bot.edit_message_text(err_dead, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
 
 if __name__ == '__main__':
