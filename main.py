@@ -1131,7 +1131,8 @@ def handle_documents(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🛑 Stop Scan" if lang == 'en' else "🛑 إيقاف الفحص", callback_data="stop_scan"))
         
-        msg_wait = bot.reply_to(message, "⏳ **جاري تحميل الملف وبدء الفحص...**\n[░░░░░░░░░░] 0%", parse_mode='Markdown', reply_markup=markup)
+        # رسالة بداية الفحص بشريط دائري عصري ومتحرك
+        msg_wait = bot.reply_to(message, "🚀 **جاري تحميل الملف وبدء الفحص المتقدم...**\n🟢 ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ `[ 0% ]`", parse_mode='Markdown', reply_markup=markup)
         
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -1218,7 +1219,7 @@ def handle_documents(message):
                     dead_count += 1
             return None
 
-        # تحديث شريط التقدم دورياً في الخلفية
+        # شريط تقدم عصري واحترافي بدوائر ملونة ونسبة مئوية واضحة
         def update_progress_bar():
             last_text = ""
             while checked_so_far < total_lines and not stop_event.is_set():
@@ -1229,16 +1230,16 @@ def handle_documents(message):
                     curr_dead = dead_count
                 
                 pct = int((curr_checked / total_lines) * 100) if total_lines > 0 else 0
-                filled = int(pct / 10)
-                bar = "█" * filled + "░" * (10 - filled)
+                filled_count = int(pct / 10)
+                circle_bar = "🟢 " * filled_count + "⚪ " * (10 - filled_count)
 
                 status_str = (
-                    f"⏳ **جاري الفحص والتحميل...**\n"
-                    f"[{bar}] `{pct}%`\n\n"
-                    f"📊 إجمالي الحسابات: `{total_lines}`\n"
-                    f"🔍 تم فحصها: `{curr_checked}`\n"
+                    f"⚡ **جاري فحص الحسابات (شريط التقدم المباشر):**\n"
+                    f"{circle_bar} `[{pct}%]`\n\n"
+                    f"📦 إجمالي الحسابات: `{total_lines}`\n"
+                    f"🔍 الحسابات المفحوصة: `{curr_checked}`\n"
                     f"✅ الصالحة (Working): `{curr_valid}`\n"
-                    f"❌ التالفة (Dead): `{curr_dead}`"
+                    f"❌ التي لا تعمل (Dead): `{curr_dead}`"
                 )
                 if status_str != last_text:
                     try:
