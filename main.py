@@ -696,7 +696,6 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
     selected_index = -1
     token_result = None
 
-    # البحث عن حساب متوافق مع الدولة المطلوبة بدقة
     for idx, acc in enumerate(accounts):
         acc_country = acc.get('country', '').upper()
         if requested_country and requested_country != "ALL":
@@ -719,7 +718,6 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             accounts = db.get("accounts", [])
             break
 
-    # إذا لم يوجد حساب مطابق تماماً للدولة وكان طلب الدولة محدد وليست ALL
     if not selected_account and requested_country and requested_country != "ALL":
         no_country_msg = f"❌ Sorry, no active accounts available right now for country ({requested_country}). Try 'ALL countries' or upload files." if lang == 'en' else f"❌ عذراً، لا توجد حسابات صالحة حالياً للدولة ({requested_country}). جرب خيار (أي دولة) أو ارفع ملفات جديدة."
         bot.send_message(chat_id, no_country_msg)
@@ -739,7 +737,6 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             bot.send_message(chat_id, msg)
             return
 
-    # خصم نقطة واحدة من رصيد المستخدم بنجاح هنا
     update_user_points(user_id, -1)
     
     if "user_last_pull" not in db:
@@ -870,8 +867,49 @@ def callback_queries(call):
             bot.answer_callback_query(call.id)
         except Exception:
             pass
-        # إرسال القائمة الرئيسية مباشرة وبشكل مستقل لتجنب تعليق الأندرويد
-        show_main_menu(chat_id, user_id)
+        # تعديل رسالة اختيار اللغة مباشرة إلى رسالة الترحيب/القائمة الرئيسية لتجنب أي تعليق في أندرويد/آيفون
+        try:
+            points = get_user_data(user_id)["points"]
+            if lang == 'en':
+                welcome_text = (
+                    f"🎬 **Welcome to the Advanced Netflix Cookie Checker Bot!**\n\n"
+                    f"💰 Your Points: `{points}` 🪙\n"
+                    "🔹 Send cookie text or token link, or upload a `.txt` / `.zip` file.\n"
+                    "🔹 Checking is FREE! Pulling accounts costs 1 point.\n"
+                    f"👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
+                    "👇 **Choose an option below:**"
+                )
+                markup = InlineKeyboardMarkup(row_width=2)
+                markup.add(
+                    InlineKeyboardButton("🎟️ Pull Account (Filter Country)", callback_data="btn_pull_menu"),
+                    InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
+                    InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
+                    InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
+                )
+                if user_id in ADMIN_IDS:
+                    markup.add(InlineKeyboardButton("📊 Admin Panel", callback_data="btn_admin"))
+            else:
+                welcome_text = (
+                    f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
+                    f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
+                    "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
+                    "🔹 سحب حساب من الذاكرة يكلف (نقطة واحدة).\n"
+                    f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
+                    "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
+                )
+                markup = InlineKeyboardMarkup(row_width=2)
+                markup.add(
+                    InlineKeyboardButton("🎟️ سحب حساب (تصفية حسب الدولة)", callback_data="btn_pull_menu"),
+                    InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
+                    InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
+                    InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
+                )
+                if user_id in ADMIN_IDS:
+                    markup.add(InlineKeyboardButton("📊 لوحة الأدمن", callback_data="btn_admin"))
+
+            bot.edit_message_text(welcome_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown', disable_web_page_preview=True)
+        except Exception:
+            show_main_menu(chat_id, user_id)
         return
         
     elif data == "check_sub":
@@ -881,7 +919,7 @@ def callback_queries(call):
                 bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
             except:
                 pass
-            show_main_menu(chat_id, user_id)
+            show_main_menu(call.message.chat.id, user_id)
         else:
             try:
                 bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
@@ -942,7 +980,6 @@ def callback_queries(call):
             bot.answer_callback_query(call.id)
         except:
             pass
-        ref_link = f"https://t.me/{bot.get_me().username}?start=ref_{user_id}"
         msg = (
             f"💳 **Recharge Points:**\n\n"
             f"1️⃣ Send your recharge code (e.g., `NETFLIX-XXXX`) directly in chat.\n"
