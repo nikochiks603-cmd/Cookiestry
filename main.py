@@ -850,16 +850,16 @@ def redeem_key_handler(message):
 def callback_queries(call):
     user_id = call.from_user.id
     data = call.data
+    chat_id = call.message.chat.id
     
     if data.startswith("lang_"):
         lang = data.split("_")[1]
         user_languages[user_id] = lang
-        msg_resp = "✅ Language set to English!" if lang == 'en' else "✅ تم اختيار اللغة العربية بنجاح!"
         try:
-            bot.answer_callback_query(call.id, msg_resp)
-        except:
+            bot.answer_callback_query(call.id)
+        except Exception:
             pass
-        show_main_menu(call.message.chat.id, user_id)
+        show_main_menu(chat_id, user_id)
         return
         
     elif data == "check_sub":
@@ -869,7 +869,7 @@ def callback_queries(call):
                 bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
             except:
                 pass
-            show_main_menu(call.message.chat.id, user_id)
+            show_main_menu(chat_id, user_id)
         else:
             try:
                 bot.answer_callback_query(call.id, "❌ You haven't subscribed to the channel yet!" if lang == 'en' else "❌ لم تقم بالاشتراك في القناة بعد!", show_alert=True)
