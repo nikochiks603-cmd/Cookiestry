@@ -1129,10 +1129,22 @@ def handle_documents(message):
     temp_dirs = []
     try:
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🛑 Stop Scan" if lang == 'en' else "🛑 إيقاف الفحص", callback_data="stop_scan"))
+        markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
         
-        # رسالة بداية الفحص بشريط دائري عصري ومتحرك
-        msg_wait = bot.reply_to(message, "🚀 **جاري تحميل الملف وبدء الفحص المتقدم...**\n🟢 ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ ⚪ `[ 0% ]`", parse_mode='Markdown', reply_markup=markup)
+        # قالب التصميم الإطاري الفخم للبدء
+        initial_progress = (
+            "╭─────────────────────────────────╮\n"
+            "│         ✨ ملخص الفحص ✨          │\n"
+            "├─────────────────────────────────┤\n"
+            "│  🗃️  الإجمالي         0         │\n"
+            "│  ⏳  تم الفحص         0         │\n"
+            "│  🟢  تعمل             0         │\n"
+            "│  🔴  لا تعمل          0         │\n"
+            "├─────────────────────────────────┤\n"
+            "│  [░░░░░░░░░░░░░░░░░░░░] 0%      │\n"
+            "╰─────────────────────────────────╯"
+        )
+        msg_wait = bot.reply_to(message, f"```text\n{initial_progress}\n```", parse_mode='Markdown', reply_markup=markup)
         
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -1219,7 +1231,7 @@ def handle_documents(message):
                     dead_count += 1
             return None
 
-        # شريط تقدم عصري واحترافي بدوائر ملونة ونسبة مئوية واضحة
+        # تحديث شريط التقدم الفخم داخل الإطار بدقة لحظية
         def update_progress_bar():
             last_text = ""
             while checked_so_far < total_lines and not stop_event.is_set():
@@ -1230,20 +1242,32 @@ def handle_documents(message):
                     curr_dead = dead_count
                 
                 pct = int((curr_checked / total_lines) * 100) if total_lines > 0 else 0
-                filled_count = int(pct / 10)
-                circle_bar = "🟢 " * filled_count + "⚪ " * (10 - filled_count)
+                filled = int(pct / 5)  # 20 مربتاً للشريط
+                bar = "█" * filled + "░" * (20 - filled)
+
+                # تنسيق الأرقام لتكون منسوبة ومضبوطة داخل الإطار
+                t_str = f"{total_lines:<9}"
+                c_str = f"{curr_checked:<9}"
+                v_str = f"{curr_valid:<13}"
+                d_str = f"{curr_dead:<10}"
+                pct_str = f"{pct}%"
 
                 status_str = (
-                    f"⚡ **جاري فحص الحسابات (شريط التقدم المباشر):**\n"
-                    f"{circle_bar} `[{pct}%]`\n\n"
-                    f"📦 إجمالي الحسابات: `{total_lines}`\n"
-                    f"🔍 الحسابات المفحوصة: `{curr_checked}`\n"
-                    f"✅ الصالحة (Working): `{curr_valid}`\n"
-                    f"❌ التي لا تعمل (Dead): `{curr_dead}`"
+                    "╭─────────────────────────────────╮\n"
+                    "│         ✨ ملخص الفحص ✨          │\n"
+                    "├─────────────────────────────────┤\n"
+                    f"│  🗃️  الإجمالي    {t_str} │\n"
+                    f"│  ⏳  تم الفحص    {c_str} │\n"
+                    f"│  🟢  تعمل        {v_str} │\n"
+                    f"│  🔴  لا تعمل     {d_str} │\n"
+                    "├─────────────────────────────────┤\n"
+                    f"│  [{bar}] {pct_str:<6} │\n"
+                    "╰─────────────────────────────────╯"
                 )
+
                 if status_str != last_text:
                     try:
-                        bot.edit_message_text(status_str, message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
+                        bot.edit_message_text(f"```text\n{status_str}\n```", message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
                         last_text = status_str
                     except:
                         pass
@@ -1302,9 +1326,24 @@ def handle_documents(message):
                 except Exception as ex:
                     logger.error(f"Error: {ex}")
 
-        final_text = f"✅ Scan completed. Found and saved ({valid_count}) working accounts. (Dead: {dead_count})" if lang == 'en' else f"✅ انتهى الفحص بنجاح.\nتم العثور وحفظ ({valid_count}) حساب شغال.\n❌ الحسابات التالفة: {dead_count}"
+        # تقرير الإطار النهائي عند الاكتمال
+        t_final = f"{total_lines:<9}"
+        v_final = f"{valid_count:<13}"
+        d_final = f"{dead_count:<10}"
+
+        final_box = (
+            "╭─────────────────────────────────╮\n"
+            "│      ✨ اكتمل الفحص بنجاح ✨      │\n"
+            "├─────────────────────────────────┤\n"
+            f"│  🗃️  الإجمالي    {t_final} │\n"
+            f"│  🟢  تعمل        {v_final} │\n"
+            f"│  🔴  لا تعمل     {d_final} │\n"
+            "├─────────────────────────────────┤\n"
+            "│  [████████████████████] 100%    │\n"
+            "╰─────────────────────────────────╯"
+        )
         try:
-            bot.edit_message_text(final_text, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"```text\n{final_box}\n```", message.chat.id, msg_wait.message_id, parse_mode='Markdown')
         except:
             pass
 
