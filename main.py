@@ -100,6 +100,8 @@ def load_db():
             if "user_last_pull" not in data:
                 data["user_last_pull"] = {}
             for uid, udata in data["users"].items():
+                if "points" not in udata:
+                    udata["points"] = 3
                 if "pulled_count" not in udata:
                     udata["pulled_count"] = 0
                 if "checked_count" not in udata:
@@ -132,9 +134,7 @@ def get_user_data(user_id):
 def update_user_points(user_id, amount):
     db = load_db()
     str_id = str(user_id)
-    if str_id in db["users"]:
-        db["users"][str_id]["points"] += amount
-    else:
+    if str_id not in db["users"]:
         db["users"][str_id] = {
             "points": 3 + amount,
             "banned": False,
@@ -142,6 +142,10 @@ def update_user_points(user_id, amount):
             "checked_count": 0,
             "join_date": datetime.now().strftime("%d/%m/%Y")
         }
+    else:
+        db["users"][str_id]["points"] += amount
+        if db["users"][str_id]["points"] < 0:
+            db["users"][str_id]["points"] = 0
     save_db(db)
 
 def increment_user_stats(user_id, pulled=0, checked=0):
@@ -775,7 +779,6 @@ def execute_smart_pull(chat_id, user_id):
     filtered = []
     for acc in accounts:
         acc_country = str(acc.get('country', '')).strip().upper()
-        
         if country != "ALL" and acc_country != country.strip().upper():
             continue
             
@@ -796,6 +799,12 @@ def execute_smart_pull(chat_id, user_id):
 
         filtered.append(acc)
 
+    # التحقق الصارم: إذا طلب المستخدم حساباً قديماً ولم يجد، أخبره بذلك فوراً ولا تعطِه حساباً حديثاً
+    if not filtered and age == 'OLD':
+        no_acc_msg = "❌ عذراً، لا توجد حالياً حسابات قديمة مطابقة (2020 وأقل) في الذاكرة!" if lang == 'ar' else "❌ Sorry, no accounts from 2020 or older available right now!"
+        bot.edit_message_text(no_acc_msg, chat_id, msg_wait.message_id)
+        return
+
     target_pool = filtered if filtered else accounts
 
     for acc in target_pool:
@@ -807,12 +816,18 @@ def execute_smart_pull(chat_id, user_id):
             break
 
     if not selected_account or not token_result:
-        selected_account = accounts[0]
-        token_result = generate_token(selected_account['cookie'].get('NetflixId'))
+        if filtered:
+            selected_account = filtered[0]
+            token_result = generate_token(selected_account['cookie'].get('NetflixId'))
+        else:
+            bot.edit_message_text("❌ عذراً، لم يتم العثور على حساب صالح يطابق خياراتك حالياً.", chat_id, msg_wait.message_id)
+            return
 
+    # خصم النقاط وحفظها بشكل صحيح ودائم في قاعدة البيانات
     update_user_points(user_id, -cost)
     increment_user_stats(user_id, pulled=1)
 
+    db = load_db()
     if "user_last_pull" not in db:
         db["user_last_pull"] = {}
     db["user_last_pull"][str(user_id)] = selected_account
@@ -821,6 +836,7 @@ def execute_smart_pull(chat_id, user_id):
     country_full = get_country_name(selected_account.get('country', 'Unknown'), lang)
     email = selected_account.get('email', 'Unknown').replace(chr(92) + 'x40', '@')
     hold_status = "✅ Active" if lang == 'en' else "✅ نشط تماماً"
+    remaining_points = get_user_data(user_id)["points"]
 
     if lang == 'en':
         res_msg = "🎬 **NETFLIX Account Pulled Successfully** 🎬\n\n"
@@ -833,7 +849,7 @@ def execute_smart_pull(chat_id, user_id):
         res_msg += f"🔄 Next Billing: `{selected_account.get('next_billing', 'Unknown')}`\n"
         res_msg += f"👥 Profiles: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 Email: `{email}`\n"
-        res_msg += f"🪙 Points Deducted: `{cost}`\n"
+        res_msg += f"🪙 Points Deducted: `{cost}` | Remaining: `{remaining_points}`\n"
         
         token_val = token_result.get('token', '') if token_result else ''
         mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
@@ -850,7 +866,7 @@ def execute_smart_pull(chat_id, user_id):
         res_msg += f"🔄 تاريخ التجديد: `{selected_account.get('next_billing', 'Unknown')}`\n"
         res_msg += f"👥 البروفايلات: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 البريد: `{email}`\n"
-        res_msg += f"🪙 النقاط المسحوبة: `{cost}` نقاط\n"
+        res_msg += f"🪙 النقاط المسحوبة: `{cost}` | رصيدك المتبقي: `{remaining_points}` نقطة\n"
         
         token_val = token_result.get('token', '') if token_result else ''
         mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
@@ -1131,8 +1147,9 @@ def handle_documents(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
         
-        # قالب التصميم الإطاري الفخم للبدء
+        # قالب التصميم السحابي الاحترافي الجديد والمطور
         initial_progress = (
+            "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
             "╭─────────────────────────────────╮\n"
             "│         ✨ ملخص الفحص ✨          │\n"
             "├─────────────────────────────────┤\n"
@@ -1144,7 +1161,7 @@ def handle_documents(message):
             "│  [░░░░░░░░░░░░░░░░░░░░] 0%      │\n"
             "╰─────────────────────────────────╯"
         )
-        msg_wait = bot.reply_to(message, f"```text\n{initial_progress}\n```", parse_mode='Markdown', reply_markup=markup)
+        msg_wait = bot.reply_to(message, initial_progress, parse_mode='Markdown', reply_markup=markup)
         
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -1231,7 +1248,7 @@ def handle_documents(message):
                     dead_count += 1
             return None
 
-        # تحديث شريط التقدم الفخم داخل الإطار بدقة لحظية
+        # تحديث شريط التقدم السحابي الفخم بدقة وسلاسة
         def update_progress_bar():
             last_text = ""
             while checked_so_far < total_lines and not stop_event.is_set():
@@ -1242,10 +1259,9 @@ def handle_documents(message):
                     curr_dead = dead_count
                 
                 pct = int((curr_checked / total_lines) * 100) if total_lines > 0 else 0
-                filled = int(pct / 5)  # 20 مربتاً للشريط
+                filled = int(pct / 5)
                 bar = "█" * filled + "░" * (20 - filled)
 
-                # تنسيق الأرقام لتكون منسوبة ومضبوطة داخل الإطار
                 t_str = f"{total_lines:<9}"
                 c_str = f"{curr_checked:<9}"
                 v_str = f"{curr_valid:<13}"
@@ -1253,6 +1269,7 @@ def handle_documents(message):
                 pct_str = f"{pct}%"
 
                 status_str = (
+                    "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
                     "╭─────────────────────────────────╮\n"
                     "│         ✨ ملخص الفحص ✨          │\n"
                     "├─────────────────────────────────┤\n"
@@ -1267,7 +1284,7 @@ def handle_documents(message):
 
                 if status_str != last_text:
                     try:
-                        bot.edit_message_text(f"```text\n{status_str}\n```", message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
+                        bot.edit_message_text(status_str, message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
                         last_text = status_str
                     except:
                         pass
@@ -1326,12 +1343,12 @@ def handle_documents(message):
                 except Exception as ex:
                     logger.error(f"Error: {ex}")
 
-        # تقرير الإطار النهائي عند الاكتمال
         t_final = f"{total_lines:<9}"
         v_final = f"{valid_count:<13}"
         d_final = f"{dead_count:<10}"
 
         final_box = (
+            "🚀 **اكتملت عملية الفحص السحابي بنجاح!**\n"
             "╭─────────────────────────────────╮\n"
             "│      ✨ اكتمل الفحص بنجاح ✨      │\n"
             "├─────────────────────────────────┤\n"
@@ -1343,7 +1360,7 @@ def handle_documents(message):
             "╰─────────────────────────────────╯"
         )
         try:
-            bot.edit_message_text(f"```text\n{final_box}\n```", message.chat.id, msg_wait.message_id, parse_mode='Markdown')
+            bot.edit_message_text(final_box, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
         except:
             pass
 
@@ -1416,7 +1433,7 @@ def handle_text_message(message):
                 res_msg = "🎬 **نتيجة فحص الحساب** 🎬\n\n"
                 res_msg += f"🌍 البلد: `{country_full}`\n"
                 res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
-                res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
+                res_msg | f"💰 السعر: `{account_info['plan_price']}`\n"
                 res_msg += f"📺 الجودة: `{account_info['video_quality']}`\n"
                 res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{account_info['member_since']}`\n"
                 res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
