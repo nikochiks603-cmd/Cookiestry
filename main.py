@@ -29,7 +29,9 @@ OWNER_LINK = "https://t.me/farxxes"
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHSmYKJKxM')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-ADMIN_IDS = [8713916851] # ضع آيدي الأدمن هنا
+# آيدي الأدمن الخاص بك
+ADMIN_IDS = [8713916851]
+
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
 CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 
@@ -580,7 +582,6 @@ def cmd_cleanmem(message):
     for acc in accounts:
         netflix_id = acc['cookie'].get('NetflixId')
         check = check_netflix_cookie({"NetflixId": netflix_id})
-        # التحقق أيضاً من إمكانية توليد التوكن لتجنب الحسابات التي تعذر استخراج رابطها
         if check["ok"] and check.get('plan') != "Unknown" and check.get('on_payment_hold') != 'Yes':
             token_res = generate_token(netflix_id)
             if token_res.get('status') == 'Success':
@@ -689,7 +690,6 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
         bot.send_message(chat_id, err_msg)
         return
 
-    # محاولة سحب حساب وتوليد رابطه، وإذا فشل توليد الرابط (انتهت صلاحيته)، نحذفه ونبحث عن غيره تلقائياً
     selected_account = None
     selected_index = -1
     token_result = None
@@ -707,18 +707,15 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
             token_result = t_res
             break
         else:
-            # الحساب تعذر توليد رابطه، سنقوم بحذفه من الذاكرة فوراً لئلا يظهر مرة أخرى
             accounts.pop(idx)
             db["accounts"] = accounts
             db["stats"]["valid"] = len(accounts)
             save_db(db)
-            # إعادة تحميل الذاكرة لتفادي مشاكل الـ Index
             db = load_db()
             accounts = db.get("accounts", [])
-            break # الخروج وإعادة المحاولة أو إعلام المستخدم
+            break
 
     if not selected_account or not token_result or token_result.get('status') != 'Success':
-        # محاولة أخيرة إذا وجد حسابات
         if accounts:
             acc = accounts.pop(0)
             netflix_id = acc['cookie'].get('NetflixId')
@@ -862,21 +859,14 @@ def callback_queries(call):
             bot.answer_callback_query(call.id, msg_resp)
         except:
             pass
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
         show_main_menu(call.message.chat.id, user_id)
+        return
         
     elif data == "check_sub":
         lang = user_languages.get(user_id, 'ar')
         if check_subscription(user_id):
             try:
                 bot.answer_callback_query(call.id, "✅ Subscription verified successfully!" if lang == 'en' else "✅ تم التحقق من اشتراكك بنجاح!")
-            except:
-                pass
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
             except:
                 pass
             show_main_menu(call.message.chat.id, user_id)
