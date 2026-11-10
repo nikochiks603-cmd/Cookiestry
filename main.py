@@ -29,7 +29,6 @@ OWNER_LINK = "https://t.me/farxxes"
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHSmYKJKxM')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# آيدي الأدمن الخاص بك
 ADMIN_IDS = [8713916851]
 
 REQUIRED_CHANNEL = os.environ.get('REQUIRED_CHANNEL', '@faresschannel')
@@ -693,50 +692,48 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
         return
 
     selected_account = None
-    selected_index = -1
     token_result = None
 
-    for idx, acc in enumerate(accounts):
-        acc_country = acc.get('country', '').upper()
+    # تصفية دقيقة ومضمونة حسب الدولة أو جلب عشوائي (ALL)
+    filtered_accounts = []
+    for acc in accounts:
+        acc_country = str(acc.get('country', '')).strip().upper()
         if requested_country and requested_country != "ALL":
-            if acc_country != requested_country.upper():
-                continue
-        
+            if acc_country == requested_country.strip().upper():
+                filtered_accounts.append(acc)
+        else:
+            filtered_accounts.append(acc)
+
+    if not filtered_accounts and requested_country and requested_country != "ALL":
+        no_country_msg = f"❌ Sorry, no active accounts available right now for country ({requested_country}). Try 'ALL countries'." if lang == 'en' else f"❌ عذراً، لا توجد حسابات صالحة حالياً للدولة ({requested_country}). جرب خيار (أي دولة)."
+        bot.send_message(chat_id, no_country_msg)
+        return
+
+    # إذا لم تتوفر حسابات أصلاً
+    if not filtered_accounts:
+        filtered_accounts = accounts
+
+    # تجربة الحسابات المتاحة وتوليد التوكن حتى يتم إيجاد حساب شغال تماماً
+    for acc in filtered_accounts:
         netflix_id = acc['cookie'].get('NetflixId')
         t_res = generate_token(netflix_id)
         if t_res.get('status') == 'Success':
             selected_account = acc
-            selected_index = idx
             token_result = t_res
             break
-        else:
-            accounts.pop(idx)
-            db["accounts"] = accounts
-            db["stats"]["valid"] = len(accounts)
-            save_db(db)
-            db = load_db()
-            accounts = db.get("accounts", [])
-            break
 
-    if not selected_account and requested_country and requested_country != "ALL":
-        no_country_msg = f"❌ Sorry, no active accounts available right now for country ({requested_country}). Try 'ALL countries' or upload files." if lang == 'en' else f"❌ عذراً، لا توجد حسابات صالحة حالياً للدولة ({requested_country}). جرب خيار (أي دولة) أو ارفع ملفات جديدة."
-        bot.send_message(chat_id, no_country_msg)
-        return
-
+    # إذا فشل توليد التوكن لأول حساب، نأخذ أول حساب متاح ونرسله للمستخدم لضمان عدم توقف البوت
     if not selected_account or not token_result or token_result.get('status') != 'Success':
         if accounts:
-            acc = accounts.pop(0)
-            netflix_id = acc['cookie'].get('NetflixId')
+            selected_account = accounts[0]
+            netflix_id = selected_account['cookie'].get('NetflixId')
             token_result = generate_token(netflix_id)
-            selected_account = acc
-            db["accounts"] = accounts
-            db["stats"]["valid"] = len(accounts)
-            save_db(db)
         else:
-            msg = "❌ Sorry, no active accounts available right now. Please try again later or upload new files!" if lang == 'en' else "❌ عذراً، لا توجد حسابات صالحة أو متاحة حالياً. يرجى المحاولة لاحقاً أو رفع ملفات جديدة!"
+            msg = "❌ Sorry, no active accounts available right now." if lang == 'en' else "❌ عذراً، لا توجد حسابات متاحة حالياً."
             bot.send_message(chat_id, msg)
             return
 
+    # خصم نقطة واحدة من رصيد المستخدم بنجاح
     update_user_points(user_id, -1)
     
     if "user_last_pull" not in db:
@@ -744,48 +741,44 @@ def execute_pull_account(chat_id, user_id, requested_country=None):
     db["user_last_pull"][str(user_id)] = selected_account
     save_db(db)
 
-    wait_text = "⏳ Pulling account and generating fresh direct login link..." if lang == 'en' else "⏳ جاري سحب الحساب وتوليد رابط دخول طازج وفعال..."
-    msg_wait = bot.send_message(chat_id, wait_text)
-
-    country_full = get_country_name(selected_account['country'], lang)
-    email = selected_account['email'].replace(chr(92) + 'x40', '@')
+    country_full = get_country_name(selected_account.get('country', 'Unknown'), lang)
+    email = selected_account.get('email', 'Unknown').replace(chr(92) + 'x40', '@')
     hold_status = "✅ Active" if lang == 'en' else "✅ نشط تماماً"
 
     if lang == 'en':
         res_msg = "🎬 **NETFLIX Account Pulled from Memory** 🎬\n\n"
         res_msg += f"🌍 Country: `{country_full}`\n"
-        res_msg += f"📦 Plan: `{selected_account['plan']}`\n"
-        res_msg += f"💰 Price: `{selected_account['plan_price']}`\n"
-        res_msg += f"📺 Quality: `{selected_account['video_quality']}` | Streams: `{selected_account['max_streams']}`\n"
+        res_msg += f"📦 Plan: `{selected_account.get('plan', 'Unknown')}`\n"
+        res_msg += f"💰 Price: `{selected_account.get('plan_price', 'Unknown')}`\n"
+        res_msg += f"📺 Quality: `{selected_account.get('video_quality', 'Unknown')}` | Streams: `{selected_account.get('max_streams', 'Unknown')}`\n"
         res_msg += f"💳 Status: `{hold_status}`\n"
-        res_msg += f"📅 Member Since: `{selected_account['member_since']}`\n"
-        res_msg += f"🔄 Next Billing: `{selected_account['next_billing']}`\n"
-        res_msg += f"👥 Profiles: `{selected_account['profiles']}`\n"
+        res_msg += f"📅 Member Since: `{selected_account.get('member_since', 'Unknown')}`\n"
+        res_msg += f"🔄 Next Billing: `{selected_account.get('next_billing', 'Unknown')}`\n"
+        res_msg += f"👥 Profiles: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 Email: `{email}`\n"
         
-        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result.get('token', '')}")
+        token_val = token_result.get('token', '') if token_result else ''
+        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
         res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
         res_msg += f"\n\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
     else:
         res_msg = "🎬 **حساب NETFLIX مسحوب من الذاكرة** 🎬\n\n"
         res_msg += f"🌍 البلد: `{country_full}`\n"
-        res_msg += f"📦 الباقة: `{selected_account['plan']}`\n"
-        res_msg += f"💰 السعر: `{selected_account['plan_price']}`\n"
-        res_msg += f"📺 الجودة: `{selected_account['video_quality']}` | الشاشات: `{selected_account['max_streams']}`\n"
+        res_msg += f"📦 الباقة: `{selected_account.get('plan', 'Unknown')}`\n"
+        res_msg += f"💰 السعر: `{selected_account.get('plan_price', 'Unknown')}`\n"
+        res_msg += f"📺 الجودة: `{selected_account.get('video_quality', 'Unknown')}` | الشاشات: `{selected_account.get('max_streams', 'Unknown')}`\n"
         res_msg += f"💳 حالة الحساب: `{hold_status}`\n"
-        res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{selected_account['member_since']}`\n"
-        res_msg += f"🔄 تاريخ التجديد: `{selected_account['next_billing']}`\n"
-        res_msg += f"👥 البروفايلات: `{selected_account['profiles']}`\n"
+        res_msg += f"📅 تاريخ الاشتراك (أول مرة): `{selected_account.get('member_since', 'Unknown')}`\n"
+        res_msg += f"🔄 تاريخ التجديد: `{selected_account.get('next_billing', 'Unknown')}`\n"
+        res_msg += f"👥 البروفايلات: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 البريد: `{email}`\n"
         
-        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_result.get('token', '')}")
+        token_val = token_result.get('token', '') if token_result else ''
+        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
         res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
         res_msg += f"\n\n👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})"
 
-    try:
-        bot.edit_message_text(res_msg, chat_id, msg_wait.message_id, parse_mode='Markdown', disable_web_page_preview=True)
-    except:
-        bot.send_message(chat_id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
+    bot.send_message(chat_id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
 
 def execute_replacement(chat_id, user_id):
     lang = user_languages.get(user_id, 'ar')
@@ -824,7 +817,7 @@ def execute_replacement(chat_id, user_id):
             res = "✅ **Account verified dead! Here is your replacement account:**\n\n" if lang == 'en' else "✅ **تم التحقق وتبين أن الحساب ميت بالفعل! إليك حساب جديد كتعويض:**\n\n"
             res += f"🌍 Country: `{country_full}` | 📦 Plan: `{new_acc['plan']}`\n"
             res += f"📧 Email: `{email}`\n"
-            if token_result.get('status') == 'Success':
+            if token_result and token_result.get('status') == 'Success':
                 m_url = token_result.get('direct_login_url')
                 res += f"📱 **Direct Login URL:**\n`{m_url}`\n"
             res += f"\n👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})"
@@ -867,7 +860,6 @@ def callback_queries(call):
             bot.answer_callback_query(call.id)
         except Exception:
             pass
-        # تعديل رسالة اختيار اللغة مباشرة إلى رسالة الترحيب/القائمة الرئيسية لتجنب أي تعليق في أندرويد/آيفون
         try:
             points = get_user_data(user_id)["points"]
             if lang == 'en':
@@ -1019,7 +1011,7 @@ def callback_queries(call):
             f"👥 إجمالي المستخدمين: `{total_users}`\n"
             f"🔍 إجمالي الحسابات المفحوصة: `{total_checked}`\n"
             f"💾 الحسابات الشغالة في الذاكرة: `{total_valid}`\n"
-            f"👨‍💻 المطور: [{OWNER_CREDIT}]({OWNER_LINK})\n"
+            f"👨‍💻 المطور: `{OWNER_CREDIT}]({OWNER_LINK})\n"
         )
         bot.send_message(call.message.chat.id, stats_msg, parse_mode='Markdown', disable_web_page_preview=True)
 
