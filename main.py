@@ -2,6 +2,7 @@ import os
 import re
 import json
 import time
+import random
 import requests
 import zipfile
 import urllib.parse
@@ -792,6 +793,7 @@ def execute_smart_pull(chat_id, user_id):
         year_match = re.search(r'(20\d\d|19\d\d)', member_since_raw)
         acc_year = int(year_match.group(1)) if year_match else 2021
 
+        # تعديل فلترة السنوات بدقة تامة حسب طلب المستخدم
         if age == 'OLD' and acc_year > 2020:
             continue
         elif age == 'NEW' and acc_year <= 2020:
@@ -799,15 +801,22 @@ def execute_smart_pull(chat_id, user_id):
 
         filtered.append(acc)
 
-    # التحقق الصارم: إذا طلب المستخدم حساباً قديماً ولم يجد، أخبره بذلك فوراً ولا تعطِه حساباً حديثاً
-    if not filtered and age == 'OLD':
-        no_acc_msg = "❌ عذراً، لا توجد حالياً حسابات قديمة مطابقة (2020 وأقل) في الذاكرة!" if lang == 'ar' else "❌ Sorry, no accounts from 2020 or older available right now!"
+    # التحقق الصارم: إذا لم يتم العثور على حسابات مطابقة للتاريخ القديم (2020 وأقل) أو الحديث
+    if not filtered:
+        if age == 'OLD':
+            no_acc_msg = "❌ عذراً، لا توجد حالياً حسابات قديمة مطابقة (2020 وأقل) في الذاكرة!" if lang == 'ar' else "❌ Sorry, no accounts from 2020 or older available right now!"
+        elif age == 'NEW':
+            no_acc_msg = "❌ عذراً، لا توجد حالياً حسابات حديثة مطابقة (بعد 2020) في الذاكرة!" if lang == 'ar' else "❌ Sorry, no new accounts available right now!"
+        else:
+            no_acc_msg = "❌ عذراً، لا توجد حسابات مطابقة لخياراتك حالياً في الذاكرة!" if lang == 'ar' else "❌ Sorry, no matching accounts available right now!"
+        
         bot.edit_message_text(no_acc_msg, chat_id, msg_wait.message_id)
         return
 
-    target_pool = filtered if filtered else accounts
+    # خلط القائمة بعشوائية تامة لمنع إعطاء نفس الحساب لنفس الخيار لكل المستخدمين
+    random.shuffle(filtered)
 
-    for acc in target_pool:
+    for acc in filtered:
         netflix_id = acc['cookie'].get('NetflixId')
         t_res = generate_token(netflix_id)
         if t_res.get('status') == 'Success':
@@ -816,12 +825,8 @@ def execute_smart_pull(chat_id, user_id):
             break
 
     if not selected_account or not token_result:
-        if filtered:
-            selected_account = filtered[0]
-            token_result = generate_token(selected_account['cookie'].get('NetflixId'))
-        else:
-            bot.edit_message_text("❌ عذراً، لم يتم العثور على حساب صالح يطابق خياراتك حالياً.", chat_id, msg_wait.message_id)
-            return
+        bot.edit_message_text("❌ عذراً، جميع الحسابات المطابقة لخياراتك تبين أنها تالفة أو منتهية حالياً.", chat_id, msg_wait.message_id)
+        return
 
     # خصم النقاط وحفظها بشكل صحيح ودائم في قاعدة البيانات
     update_user_points(user_id, -cost)
@@ -1147,7 +1152,6 @@ def handle_documents(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
         
-        # قالب التصميم السحابي الاحترافي الجديد والمطور
         initial_progress = (
             "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
             "╭─────────────────────────────────╮\n"
@@ -1248,7 +1252,6 @@ def handle_documents(message):
                     dead_count += 1
             return None
 
-        # تحديث شريط التقدم السحابي الفخم بدقة وسلاسة
         def update_progress_bar():
             last_text = ""
             while checked_so_far < total_lines and not stop_event.is_set():
@@ -1433,7 +1436,7 @@ def handle_text_message(message):
                 res_msg = "🎬 **نتيجة فحص الحساب** 🎬\n\n"
                 res_msg += f"🌍 البلد: `{country_full}`\n"
                 res_msg += f"📦 الباقة: `{account_info['plan']}`\n"
-                res_msg | f"💰 السعر: `{account_info['plan_price']}`\n"
+                res_msg += f"💰 السعر: `{account_info['plan_price']}`\n"
                 res_msg += f"📺 الجودة: `{account_info['video_quality']}`\n"
                 res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{account_info['member_since']}`\n"
                 res_msg += f"🔄 تاريخ التجديد: `{account_info['next_billing']}`\n"
