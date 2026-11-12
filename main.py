@@ -38,7 +38,6 @@ CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 DB_FILE = 'database.json'
 db_lock = threading.Lock()
 
-# قاموس لتخصيص قفل منفصل لكل مستخدم على حدة لكي لا يتداخل فحص المستخدمين ببعضهم
 user_locks = {}
 user_locks_lock = threading.Lock()
 
@@ -126,6 +125,8 @@ def load_db():
                     udata["checked_count"] = 0
                 if "join_date" not in udata:
                     udata["join_date"] = datetime.now().strftime("%d/%m/%Y")
+                if "referred_by" not in udata:
+                    udata["referred_by"] = None
             return data
     except:
         return {"users": {}, "accounts": [], "stats": {"checked": 0, "valid": 0}, "redeem_codes": {}, "user_last_pull": {}}
@@ -144,7 +145,8 @@ def get_user_data(user_id):
             "banned": False,
             "pulled_count": 0,
             "checked_count": 0,
-            "join_date": datetime.now().strftime("%d/%m/%Y")
+            "join_date": datetime.now().strftime("%d/%m/%Y"),
+            "referred_by": None
         }
         save_db(db)
     return db["users"][str_id]
@@ -158,7 +160,8 @@ def update_user_points(user_id, amount):
             "banned": False,
             "pulled_count": 0,
             "checked_count": 0,
-            "join_date": datetime.now().strftime("%d/%m/%Y")
+            "join_date": datetime.now().strftime("%d/%m/%Y"),
+            "referred_by": None
         }
     else:
         db["users"][str_id]["points"] += amount
@@ -498,6 +501,27 @@ def extract_zip_and_get_files(zip_path, extract_dir):
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     user_id = message.from_user.id
+    
+    # التحقق من نظام الإحالة (Referral) عند الضغط على start مع بارامتر
+    args = message.text.split()
+    if len(args) > 1:
+        ref_arg = args[1]
+        if ref_arg.isdigit():
+            referrer_id = int(ref_arg)
+            if referrer_id != user_id:
+                user_data = get_user_data(user_id)
+                if user_data.get("referred_by") is None:
+                    # تعيين أن المستخدم دُعي بواسطة شخص آخر
+                    db = load_db()
+                    db["users"][str(user_id)]["referred_by"] = referrer_id
+                    save_db(db)
+                    # منح نقطتين للمدعو وصاحب الرابط
+                    update_user_points(referrer_id, 2)
+                    try:
+                        bot.send_message(referrer_id, f"🎁 **مبروك!** قام شخص بالدخول عبر رابط الدعوة الخاص بك وحصلت على `2` نقاط إضافية.")
+                    except:
+                        pass
+
     user_data = get_user_data(user_id)
     if user_data.get("banned", False):
         bot.reply_to(message, "❌ You are banned from using this bot." if user_languages.get(user_id) == 'en' else "❌ أنت محظور من استخدام هذا البوت.")
@@ -541,7 +565,7 @@ def show_main_menu(chat_id, user_id):
             InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
             InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
-            InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
+            InlineKeyboardButton("💳 Recharge Points & Invite", callback_data="btn_recharge"),
             InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
         )
         if user_id in ADMIN_IDS:
@@ -551,7 +575,7 @@ def show_main_menu(chat_id, user_id):
             f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
             f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
             "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
-            "🔹 سحب حساب ذكي حسب المنطقة والجودة.\n"
+            "🔹 سحب حساب ذكي حسب المنطقة والجودة (مع عرض العدد المتاح!).\n"
             f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
             "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
         )
@@ -559,7 +583,7 @@ def show_main_menu(chat_id, user_id):
             InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
             InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
-            InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
+            InlineKeyboardButton("💳 شحن النقاط ودعوة الأصدقاء", callback_data="btn_recharge"),
             InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
         )
         if user_id in ADMIN_IDS:
@@ -765,6 +789,31 @@ def cmd_ban(message):
     except:
         bot.reply_to(message, "❌ Usage: `/ban [user_id]`")
 
+def count_filtered_accounts(region, quality):
+    db = load_db()
+    accounts = db.get("accounts", [])
+    count = 0
+    for acc in accounts:
+        acc_country = str(acc.get('country', '')).strip().upper()
+        if region != "ALL":
+            allowed_countries = REGION_COUNTRIES.get(region, [])
+            if acc_country not in allowed_countries:
+                continue
+
+        q_text = str(acc.get('video_quality', '')).upper()
+        if quality == 'UHD':
+            if 'ULTRA' not in q_text and '4K' not in q_text:
+                continue
+        elif quality == 'HD':
+            if 'HD' not in q_text and '720' not in q_text:
+                continue
+        elif quality == 'HD720':
+            if '720' not in q_text:
+                continue
+
+        count += 1
+    return count
+
 def execute_smart_pull(chat_id, user_id):
     lang = user_languages.get(user_id, 'ar')
     if not check_subscription(user_id):
@@ -773,9 +822,10 @@ def execute_smart_pull(chat_id, user_id):
 
     session = user_pull_sessions.get(user_id, {})
     region = session.get('region', 'ALL')
-    quality = session.get('quality', 'ANY')
+    quality = session.get('quality', 'UHD')
 
-    cost = 1 if quality == 'UHD' else 0
+    # الأسعار الجديدة للنقاط حسب الدقة
+    cost = 3 if quality == 'UHD' else (2 if quality == 'HD' else 1)
 
     user_data = get_user_data(user_id)
     if user_data["points"] < cost:
@@ -809,11 +859,11 @@ def execute_smart_pull(chat_id, user_id):
         if quality == 'UHD':
             if 'ULTRA' not in q_text and '4K' not in q_text:
                 continue
-        elif quality == 'HD720':
-            if '720' not in q_text and 'HD' not in q_text and 'STANDARD' in q_text:
+        elif quality == 'HD':
+            if 'HD' not in q_text and '720' not in q_text:
                 continue
-        elif quality == 'STANDARD':
-            if 'STANDARD' not in q_text and 'BASIC' not in q_text:
+        elif quality == 'HD720':
+            if '720' not in q_text:
                 continue
 
         filtered.append(acc)
@@ -1003,7 +1053,7 @@ def callback_queries(call):
                     InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
                     InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
-                    InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
+                    InlineKeyboardButton("💳 Recharge Points & Invite", callback_data="btn_recharge"),
                     InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
                 )
                 if user_id in ADMIN_IDS:
@@ -1021,7 +1071,7 @@ def callback_queries(call):
                     InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
                     InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
-                    InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
+                    InlineKeyboardButton("💳 شحن النقاط ودعوة الأصدقاء", callback_data="btn_recharge"),
                     InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
                 )
                 if user_id in ADMIN_IDS:
@@ -1062,16 +1112,24 @@ def callback_queries(call):
     elif data == "btn_pull_region":
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
+        
+        # حساب أعداد الحسابات المتاحة لكل منطقة لعرضها للمستخدم مباشرة
+        count_all = count_filtered_accounts("ALL", "UHD") + count_filtered_accounts("ALL", "HD") + count_filtered_accounts("ALL", "HD720")
+        count_am = count_filtered_accounts("AMERICA", "UHD") + count_filtered_accounts("AMERICA", "HD") + count_filtered_accounts("AMERICA", "HD720")
+        count_eu = count_filtered_accounts("EUROPE", "UHD") + count_filtered_accounts("EUROPE", "HD") + count_filtered_accounts("EUROPE", "HD720")
+        count_me = count_filtered_accounts("MIDDLE_EAST", "UHD") + count_filtered_accounts("MIDDLE_EAST", "HD") + count_filtered_accounts("MIDDLE_EAST", "HD720")
+        count_as = count_filtered_accounts("ASIA", "UHD") + count_filtered_accounts("ASIA", "HD") + count_filtered_accounts("ASIA", "HD720")
+
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
-            InlineKeyboardButton("🌐 أي منطقة (عشوائي)", callback_data="pull_r_ALL"),
-            InlineKeyboardButton("🇺🇸 أمريكا", callback_data="pull_r_AMERICA"),
-            InlineKeyboardButton("🇪🇺 أوروبا", callback_data="pull_r_EUROPE"),
-            InlineKeyboardButton("🕌 الشرق الأوسط", callback_data="pull_r_MIDDLE_EAST"),
-            InlineKeyboardButton("🌏 آسيا", callback_data="pull_r_ASIA"),
+            InlineKeyboardButton(f"🌐 أي منطقة (عشوائي) - ({count_all} متاح)" if count_all > 0 else "🌐 أي منطقة (عشوائي) - (لا يوجد)", callback_data="pull_r_ALL"),
+            InlineKeyboardButton(f"🇺🇸 أمريكا - ({count_am} متاح)" if count_am > 0 else "🇺🇸 أمريكا - (لا يوجد)", callback_data="pull_r_AMERICA"),
+            InlineKeyboardButton(f"🇪🇺 أوروبا - ({count_eu} متاح)" if count_eu > 0 else "🇪🇺 أوروبا - (لا يوجد)", callback_data="pull_r_EUROPE"),
+            InlineKeyboardButton(f"🕌 الشرق الأوسط - ({count_me} متاح)" if count_me > 0 else "🕌 الشرق الأوسط - (لا يوجد)", callback_data="pull_r_MIDDLE_EAST"),
+            InlineKeyboardButton(f"🌏 آسيا - ({count_as} متاح)" if count_as > 0 else "🌏 آسيا - (لا يوجد)", callback_data="pull_r_ASIA"),
             InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_menu")
         )
-        msg_txt = "🌍 **Step 1: Select Region:**" if lang == 'en' else "🌍 **الخطوة 1: اختر المنطقة المطلوبة:**"
+        msg_txt = "🌍 **الخطوة 1: اختر المنطقة المطلوبة (يظهر أمام كل منطقة العدد المتاح):**" if lang == 'ar' else "🌍 **Step 1: Select Region:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_r_"):
@@ -1080,14 +1138,23 @@ def callback_queries(call):
             user_pull_sessions[user_id] = {}
         user_pull_sessions[user_id]['region'] = r_code
 
+        # حساب الأعداد المتاحة لكل دقة بناءً على المنطقة المختارة
+        count_uhd = count_filtered_accounts(r_code, 'UHD')
+        count_hd = count_filtered_accounts(r_code, 'HD')
+        count_720 = count_filtered_accounts(r_code, 'HD720')
+
+        uhd_label = f"🌟 Ultra 4K / UHD (3 نقاط) - ({count_uhd} متاح)" if count_uhd > 0 else "🌟 Ultra 4K / UHD (3 نقاط) - (لا يوجد)"
+        hd_label = f"📺 HD (نقطتان) - ({count_hd} متاح)" if count_hd > 0 else "📺 HD (نقطتان) - (لا يوجد)"
+        h720_label = f"🎬 720p (نقطة واحدة) - ({count_720} متاح)" if count_720 > 0 else "🎬 720p (نقطة واحدة) - (لا يوجد)"
+
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
-            InlineKeyboardButton("🌟 Ultra 4K / UHD (+1 Point)", callback_data="pull_q_UHD"),
-            InlineKeyboardButton("📺 HD (720p) (مجاني 0 نقاط)", callback_data="pull_q_HD720"),
-            InlineKeyboardButton("🎬 Standard (مجاني 0 نقاط)", callback_data="pull_q_STANDARD"),
+            InlineKeyboardButton(uhd_label, callback_data="pull_q_UHD"),
+            InlineKeyboardButton(hd_label, callback_data="pull_q_HD"),
+            InlineKeyboardButton(h720_label, callback_data="pull_q_HD720"),
             InlineKeyboardButton("🔙 رجوع لاختيار المنطقة", callback_data="btn_pull_region")
         )
-        msg_txt = "📺 **Step 2: Select Video Quality:**" if lang == 'en' else "📺 **الخطوة 2: اختر دقة الحساب المطلوبة:**"
+        msg_txt = "📺 **الخطوة 2: اختر دقة الحساب المطلوبة (يظهر أمام كل دقة السعر والعدد المتاح):**" if lang == 'ar' else "📺 **Step 2: Select Video Quality:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_q_"):
@@ -1099,14 +1166,20 @@ def callback_queries(call):
         execute_replacement(chat_id, user_id)
 
     elif data == "btn_recharge":
+        bot_info = bot.get_me()
+        bot_username = bot_info.username
+        referral_link = f"https://t.me/{bot_username}?start={user_id}"
+
         msg = (
-            f"💳 **Recharge Points:**\n\n"
+            f"💳 **شحن النقاط ودعوة الأصدقاء:**\n\n"
+            f"1️⃣ أرسل كود الشحن (`NETFLIX-XXXX`) مباشرة هنا في الحوار.\n"
+            f"2️⃣ **رابط الدعوة الخاص بك:**\n`{referral_link}`\n\n"
+            f"🎁 *شارك رابط الدعوة مع أصدقائك، ولكل شخص يدخل عبر رابطك ويشترك ستحصل فوراً على `2` نقاط مجانية!*"
+        ) if lang == 'ar' else (
+            f"💳 **Recharge Points & Invite Friends:**\n\n"
             f"1️⃣ Send your recharge code (`NETFLIX-XXXX`) in chat.\n"
-            f"2️⃣ Send your ID (`/id`) to developer [{OWNER_CREDIT}]({OWNER_LINK})."
-        ) if lang == 'en' else (
-            f"💳 **طريقة شحن النقاط:**\n\n"
-            f"1️⃣ أرسل كود الشحن (`NETFLIX-XXXX`) مباشرة هنا.\n"
-            f"2️⃣ أرسل معرفك `/id` للمطور [{OWNER_CREDIT}]({OWNER_LINK}) لشحن النقاط."
+            f"2️⃣ **Your Referral Link:**\n`{referral_link}`\n\n"
+            f"🎁 *Invite friends and earn `2` points for every referral!*"
         )
         bot.send_message(chat_id, msg, parse_mode='Markdown', disable_web_page_preview=True)
         
@@ -1136,7 +1209,6 @@ def handle_documents(message):
         send_sub_required_message(message, lang)
         return
 
-    # قفل خاص بكل مستخدم: منع المستخدم نفسه من فحص ملفين في نفس الوقت، بينما باقي المستخدمين يفحصون بحرية
     user_scan_lock = get_user_lock(user_id)
     if not user_scan_lock.acquire(blocking=False):
         bot.reply_to(message, "⏳ **لديك عملية فحص ملف جارية حالياً.**\nيرجى الانتظار حتى ينتهي البوت من فحص ملفك الحالي ليبدأ في فحص هذا الملف تلقائياً.", parse_mode='Markdown')
