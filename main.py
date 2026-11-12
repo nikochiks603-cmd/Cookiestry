@@ -353,6 +353,16 @@ def check_netflix_cookie(cookie_dict):
         video_quality = find(r'"videoQuality"[^}]+"value":"([^"]+)"') or "Unknown"
         max_streams = find(r'"maxStreams"[^}]+"value":(\d+)') or "Unknown"
 
+        # تصحيح دقة الفحص وضبطها بشكل دقيق جداً
+        q_lower = video_quality.lower()
+        streams_str = str(max_streams)
+        if 'ultra' in q_lower or '4k' in q_lower or streams_str == '4':
+            video_quality = 'Ultra HD (4K)'
+        elif 'hd' in q_lower or streams_str == '2':
+            video_quality = 'Full HD'
+        elif '720' in q_lower or streams_str == '1' or 'standard' in q_lower:
+            video_quality = '720p'
+
         payment_hold_match = re.search(r'"growthHoldMetadata"[^}]+"isUserOnHold":(true|false)', txt)
         payment_hold = "Yes" if payment_hold_match and payment_hold_match.group(1) == 'true' else "No"
 
@@ -502,7 +512,6 @@ def extract_zip_and_get_files(zip_path, extract_dir):
 def send_welcome(message):
     user_id = message.from_user.id
     
-    # التحقق من نظام الإحالة (Referral) عند الضغط على start مع بارامتر
     args = message.text.split()
     if len(args) > 1:
         ref_arg = args[1]
@@ -511,11 +520,9 @@ def send_welcome(message):
             if referrer_id != user_id:
                 user_data = get_user_data(user_id)
                 if user_data.get("referred_by") is None:
-                    # تعيين أن المستخدم دُعي بواسطة شخص آخر
                     db = load_db()
                     db["users"][str(user_id)]["referred_by"] = referrer_id
                     save_db(db)
-                    # منح نقطتين للمدعو وصاحب الرابط
                     update_user_points(referrer_id, 2)
                     try:
                         bot.send_message(referrer_id, f"🎁 **مبروك!** قام شخص بالدخول عبر رابط الدعوة الخاص بك وحصلت على `2` نقاط إضافية.")
@@ -574,8 +581,8 @@ def show_main_menu(chat_id, user_id):
         welcome_text = (
             f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
             f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
-            "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
-            "🔹 سحب حساب ذكي حسب المنطقة والجودة (مع عرض العدد المتاح!).\n"
+            "🔹 فحص الملفات والكوكيز (مجاني وسريع جداً!).\n"
+            "🔹 سحب حساب ذكي حسب المنطقة والدقة.\n"
             f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
             "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
         )
@@ -664,7 +671,7 @@ def cmd_broadcast(message):
         try:
             bot.send_message(int(uid), text_to_broadcast, parse_mode='Markdown', disable_web_page_preview=True)
             success_count += 1
-            time.sleep(0.1)
+            time.sleep(0.05)
         except:
             fail_count += 1
 
@@ -737,7 +744,7 @@ def background_auto_cleaner():
                     token_res = generate_token(netflix_id)
                     if token_res.get('status') == 'Success':
                         valid_accounts.append(acc)
-                time.sleep(1)
+                time.sleep(0.5)
             
             db["accounts"] = valid_accounts
             db["stats"]["valid"] = len(valid_accounts)
@@ -805,9 +812,9 @@ def count_filtered_accounts(region, quality):
             if 'ULTRA' not in q_text and '4K' not in q_text:
                 continue
         elif quality == 'HD':
-            if 'HD' not in q_text and '720' not in q_text:
+            if 'HD' not in q_text and 'FULL' not in q_text:
                 continue
-        elif quality == 'HD720':
+        elif quality == '720P':
             if '720' not in q_text:
                 continue
 
@@ -824,7 +831,6 @@ def execute_smart_pull(chat_id, user_id):
     region = session.get('region', 'ALL')
     quality = session.get('quality', 'UHD')
 
-    # الأسعار الجديدة للنقاط حسب الدقة
     cost = 3 if quality == 'UHD' else (2 if quality == 'HD' else 1)
 
     user_data = get_user_data(user_id)
@@ -860,9 +866,9 @@ def execute_smart_pull(chat_id, user_id):
             if 'ULTRA' not in q_text and '4K' not in q_text:
                 continue
         elif quality == 'HD':
-            if 'HD' not in q_text and '720' not in q_text:
+            if 'HD' not in q_text and 'FULL' not in q_text:
                 continue
-        elif quality == 'HD720':
+        elif quality == '720P':
             if '720' not in q_text:
                 continue
 
@@ -1113,12 +1119,11 @@ def callback_queries(call):
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
         
-        # حساب أعداد الحسابات المتاحة لكل منطقة لعرضها للمستخدم مباشرة
-        count_all = count_filtered_accounts("ALL", "UHD") + count_filtered_accounts("ALL", "HD") + count_filtered_accounts("ALL", "HD720")
-        count_am = count_filtered_accounts("AMERICA", "UHD") + count_filtered_accounts("AMERICA", "HD") + count_filtered_accounts("AMERICA", "HD720")
-        count_eu = count_filtered_accounts("EUROPE", "UHD") + count_filtered_accounts("EUROPE", "HD") + count_filtered_accounts("EUROPE", "HD720")
-        count_me = count_filtered_accounts("MIDDLE_EAST", "UHD") + count_filtered_accounts("MIDDLE_EAST", "HD") + count_filtered_accounts("MIDDLE_EAST", "HD720")
-        count_as = count_filtered_accounts("ASIA", "UHD") + count_filtered_accounts("ASIA", "HD") + count_filtered_accounts("ASIA", "HD720")
+        count_all = count_filtered_accounts("ALL", "UHD") + count_filtered_accounts("ALL", "HD") + count_filtered_accounts("ALL", "720P")
+        count_am = count_filtered_accounts("AMERICA", "UHD") + count_filtered_accounts("AMERICA", "HD") + count_filtered_accounts("AMERICA", "720P")
+        count_eu = count_filtered_accounts("EUROPE", "UHD") + count_filtered_accounts("EUROPE", "HD") + count_filtered_accounts("EUROPE", "720P")
+        count_me = count_filtered_accounts("MIDDLE_EAST", "UHD") + count_filtered_accounts("MIDDLE_EAST", "HD") + count_filtered_accounts("MIDDLE_EAST", "720P")
+        count_as = count_filtered_accounts("ASIA", "UHD") + count_filtered_accounts("ASIA", "HD") + count_filtered_accounts("ASIA", "720P")
 
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
@@ -1138,10 +1143,9 @@ def callback_queries(call):
             user_pull_sessions[user_id] = {}
         user_pull_sessions[user_id]['region'] = r_code
 
-        # حساب الأعداد المتاحة لكل دقة بناءً على المنطقة المختارة
         count_uhd = count_filtered_accounts(r_code, 'UHD')
         count_hd = count_filtered_accounts(r_code, 'HD')
-        count_720 = count_filtered_accounts(r_code, 'HD720')
+        count_720 = count_filtered_accounts(r_code, '720P')
 
         uhd_label = f"🌟 Ultra 4K / UHD (3 نقاط) - ({count_uhd} متاح)" if count_uhd > 0 else "🌟 Ultra 4K / UHD (3 نقاط) - (لا يوجد)"
         hd_label = f"📺 HD (نقطتان) - ({count_hd} متاح)" if count_hd > 0 else "📺 HD (نقطتان) - (لا يوجد)"
@@ -1151,7 +1155,7 @@ def callback_queries(call):
         markup.add(
             InlineKeyboardButton(uhd_label, callback_data="pull_q_UHD"),
             InlineKeyboardButton(hd_label, callback_data="pull_q_HD"),
-            InlineKeyboardButton(h720_label, callback_data="pull_q_HD720"),
+            InlineKeyboardButton(h720_label, callback_data="pull_q_720P"),
             InlineKeyboardButton("🔙 رجوع لاختيار المنطقة", callback_data="btn_pull_region")
         )
         msg_txt = "📺 **الخطوة 2: اختر دقة الحساب المطلوبة (يظهر أمام كل دقة السعر والعدد المتاح):**" if lang == 'ar' else "📺 **Step 2: Select Video Quality:**"
@@ -1214,6 +1218,13 @@ def handle_documents(message):
         bot.reply_to(message, "⏳ **لديك عملية فحص ملف جارية حالياً.**\nيرجى الانتظار حتى ينتهي البوت من فحص ملفك الحالي ليبدأ في فحص هذا الملف تلقائياً.", parse_mode='Markdown')
         return
 
+    # تشغيل الفحص في Thread منفصل تماماً عن البوت لكي يظل البوت سريعاً ولا يتجمد مع أي مستخدم آخر
+    threading.Thread(target=process_uploaded_document, args=(message, user_scan_lock), daemon=True).start()
+
+def process_uploaded_document(message, user_scan_lock):
+    user_id = message.from_user.id
+    lang = user_languages.get(user_id, 'ar')
+    
     try:
         stop_event = threading.Event()
         active_scans[user_id] = stop_event
@@ -1224,7 +1235,7 @@ def handle_documents(message):
             markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
             
             initial_progress = (
-                "🚀 **نظام الفحص الذكي قيد التشغيل...**\n"
+                "🚀 **نظام الفحص الذكي قيد التشغيل (في الخلفية)...**\n"
                 "╭─────────────────────────────────╮\n"
                 "│         ✨ ملخص الفحص ✨          │\n"
                 "├─────────────────────────────────┤\n"
@@ -1297,7 +1308,7 @@ def handle_documents(message):
                             checked_so_far += 1
                             dead_count += 1
                         return None
-                    time.sleep(0.3)
+                    time.sleep(0.1)
                     account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
                     if stop_event.is_set():
                         return None
@@ -1325,7 +1336,7 @@ def handle_documents(message):
             def update_progress_bar():
                 last_text = ""
                 while checked_so_far < total_lines and not stop_event.is_set():
-                    time.sleep(2.5)
+                    time.sleep(2.0)
                     with lock:
                         curr_checked = checked_so_far
                         curr_valid = valid_count
@@ -1365,7 +1376,8 @@ def handle_documents(message):
             progress_thread = threading.Thread(target=update_progress_bar, daemon=True)
             progress_thread.start()
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
+            # زيادة السرعة عبر ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(process_line, line.strip()) for line in all_lines if line.strip()]
                 for future in as_completed(futures):
                     if stop_event.is_set():
@@ -1385,6 +1397,7 @@ def handle_documents(message):
                             token_result = acc.get('token_result', {})
                             token_val = token_result.get('token', 'N/A')
                             mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
+                            netflix_id_val = acc['cookie'].get('NetflixId', '')
 
                             if lang == 'en':
                                 res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
@@ -1411,7 +1424,13 @@ def handle_documents(message):
                                 
                             bot.send_message(message.chat.id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
                             
-                            valid_accounts_text += f"Email: {email}\nPlan: {plan} | Country: {country_full}\nLogin URL: {mobile_url}\n\n"
+                            # إضافة الكوكيز وبيانات الحساب معاً في الملف النصي النهائي
+                            valid_accounts_text += f"----------------------------------------\n"
+                            valid_accounts_text += f"Email: {email}\n"
+                            valid_accounts_text += f"Plan: {plan} | Quality: {quality} | Country: {country_full}\n"
+                            valid_accounts_text += f"Login URL: {mobile_url}\n"
+                            valid_accounts_text += f"NetflixId Cookie: {netflix_id_val}\n"
+                            valid_accounts_text += f"----------------------------------------\n\n"
                     except Exception as ex:
                         logger.error(f"Error: {ex}")
 
@@ -1441,7 +1460,7 @@ def handle_documents(message):
                 with open(result_file_path, 'w', encoding='utf-8') as rf:
                     rf.write(valid_accounts_text)
                 with open(result_file_path, 'rb') as rf:
-                    bot.send_document(message.chat.id, rf, caption="📁 Valid accounts summary file.")
+                    bot.send_document(message.chat.id, rf, caption="📁 تقرير الحسابات الصالحة (مع الكوكيز وروابط الدخول والبيانات).")
 
         except Exception as e:
             bot.reply_to(message, f"❌ Error: {str(e)}")
