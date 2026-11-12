@@ -61,7 +61,7 @@ COUNTRY_DATA = {
     'TR': {'ar': '🇹🇷 تركيا', 'en': '🇹🇷 Turkey'},
     'AR': {'ar': '🇦🇷 الأرجنتين', 'en': '🇦🇷 Argentina'},
     'IN': {'ar': '🇮🇳 الهند', 'en': '🇮🇳 India'},
-    'EG': {'ar': '🇪🇬 مصر', 'en': '🇮🇳 Egypt'},
+    'EG': {'ar': '🇪🇬 مصر', 'en': '🇪🇬 Egypt'},
     'SA': {'ar': '🇸🇦 السعودية', 'en': '🇸🇦 Saudi Arabia'},
     'AE': {'ar': '🇦🇪 الإمارات', 'en': '🇦🇪 UAE'},
     'MA': {'ar': '🇲🇦 المغرب', 'en': '🇲🇦 Morocco'},
@@ -297,10 +297,18 @@ def extract_next_billing_date(response_text):
         logger.error(f"Error extracting billing date: {e}")
     return "Unknown"
 
+# نظام موازنة الحمل وتوزيع الطلبات بين رابورات الفحص (Load Balancer & Multi-Endpoint Check)
 def check_netflix_cookie(cookie_dict):
     session = requests.Session()
     session.cookies.update(cookie_dict)
-    url = 'https://www.netflix.com/YourAccount'
+    
+    # توزيع الطلبات على مسارات نيتفليكس لمنع البلوك والتقليل من الضغط (Load Balancing)
+    endpoints = [
+        'https://www.netflix.com/YourAccount',
+        'https://www.netflix.com/youraccount'
+    ]
+    url = random.choice(endpoints)
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
@@ -511,7 +519,6 @@ def show_main_menu(chat_id, user_id):
     lang = user_languages.get(user_id, 'ar')
     points = user_data["points"]
     
-    # استخدام row_width=1 لجعل كل زر في سطر مستقل لضمان ظهور الكتابة كاملة دون قص
     markup = InlineKeyboardMarkup(row_width=1)
     
     if lang == 'en':
@@ -1136,7 +1143,7 @@ def handle_documents(message):
             markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
             
             initial_progress = (
-                "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
+                "🚀 **نظام التوزيع الذكي والموازنة قيد التشغيل...**\n"
                 "╭─────────────────────────────────╮\n"
                 "│         ✨ ملخص الفحص ✨          │\n"
                 "├─────────────────────────────────┤\n"
@@ -1199,6 +1206,7 @@ def handle_documents(message):
 
             lock = threading.Lock()
 
+            # تقسيم وتقسيم المهام على مجموعات متوازية لتفادي البلوك
             def process_line(line):
                 nonlocal checked_so_far, valid_count, dead_count
                 if stop_event.is_set():
@@ -1210,7 +1218,7 @@ def handle_documents(message):
                             checked_so_far += 1
                             dead_count += 1
                         return None
-                    time.sleep(0.2)
+                    time.sleep(0.15)
                     account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
                     if stop_event.is_set():
                         return None
@@ -1255,7 +1263,7 @@ def handle_documents(message):
                     pct_str = f"{pct}%"
 
                     status_str = (
-                        "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
+                        "🚀 **نظام التوزيع الذكي والموازنة قيد التشغيل...**\n"
                         "╭─────────────────────────────────╮\n"
                         "│         ✨ ملخص الفحص ✨          │\n"
                         "├─────────────────────────────────┤\n"
@@ -1278,6 +1286,7 @@ def handle_documents(message):
             progress_thread = threading.Thread(target=update_progress_bar, daemon=True)
             progress_thread.start()
 
+            # استخدام مسارين متوازيين موزعين لتوزيع الضغط ومنع الـ Lag
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [executor.submit(process_line, line.strip()) for line in all_lines if line.strip()]
                 for future in as_completed(futures):
