@@ -37,7 +37,16 @@ CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 
 DB_FILE = 'database.json'
 db_lock = threading.Lock()
-scan_queue_lock = threading.Lock()
+
+# قاموس لتخصيص قفل منفصل لكل مستخدم على حدة لكي لا يتداخل فحص المستخدمين ببعضهم
+user_locks = {}
+user_locks_lock = threading.Lock()
+
+def get_user_lock(user_id):
+    with user_locks_lock:
+        if user_id not in user_locks:
+            user_locks[user_id] = threading.Lock()
+        return user_locks[user_id]
 
 active_scans = {}
 user_languages = {}
@@ -1127,8 +1136,10 @@ def handle_documents(message):
         send_sub_required_message(message, lang)
         return
 
-    if not scan_queue_lock.acquire(blocking=False):
-        bot.reply_to(message, "⏳ **هناك عملية فحص جارية حالياً لملف آخر.**\nيرجى الانتظار حتى تنتهي العملية الحالية ليتم بدء فحص ملفك تلقائياً.", parse_mode='Markdown')
+    # قفل خاص بكل مستخدم: منع المستخدم نفسه من فحص ملفين في نفس الوقت، بينما باقي المستخدمين يفحصون بحرية
+    user_scan_lock = get_user_lock(user_id)
+    if not user_scan_lock.acquire(blocking=False):
+        bot.reply_to(message, "⏳ **لديك عملية فحص ملف جارية حالياً.**\nيرجى الانتظار حتى ينتهي البوت من فحص ملفك الحالي ليبدأ في فحص هذا الملف تلقائياً.", parse_mode='Markdown')
         return
 
     try:
@@ -1141,7 +1152,7 @@ def handle_documents(message):
             markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
             
             initial_progress = (
-                "🚀 **نظام التوزيع الذكي والموازنة قيد التشغيل...**\n"
+                "🚀 **نظام الفحص الذكي قيد التشغيل...**\n"
                 "╭─────────────────────────────────╮\n"
                 "│         ✨ ملخص الفحص ✨          │\n"
                 "├─────────────────────────────────┤\n"
@@ -1200,7 +1211,6 @@ def handle_documents(message):
             valid_accounts_text = "========================================\n"
             valid_accounts_text += f"NETFLIX VALID ACCOUNTS REPORT - Dev: {OWNER_CREDIT}\n"
             valid_accounts_text += "========================================\n\n"
-            netscape_text = "# Netscape HTTP Cookie File\n\n"
 
             lock = threading.Lock()
 
@@ -1215,7 +1225,7 @@ def handle_documents(message):
                             checked_so_far += 1
                             dead_count += 1
                         return None
-                    time.sleep(0.15)
+                    time.sleep(0.3)
                     account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
                     if stop_event.is_set():
                         return None
@@ -1243,7 +1253,7 @@ def handle_documents(message):
             def update_progress_bar():
                 last_text = ""
                 while checked_so_far < total_lines and not stop_event.is_set():
-                    time.sleep(2)
+                    time.sleep(2.5)
                     with lock:
                         curr_checked = checked_so_far
                         curr_valid = valid_count
@@ -1260,7 +1270,7 @@ def handle_documents(message):
                     pct_str = f"{pct}%"
 
                     status_str = (
-                        "🚀 **نظام التوزيع الذكي والموازنة قيد التشغيل...**\n"
+                        "🚀 **نظام الفحص الذكي قيد التشغيل...**\n"
                         "╭─────────────────────────────────╮\n"
                         "│         ✨ ملخص الفحص ✨          │\n"
                         "├─────────────────────────────────┤\n"
@@ -1330,7 +1340,6 @@ def handle_documents(message):
                             bot.send_message(message.chat.id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
                             
                             valid_accounts_text += f"Email: {email}\nPlan: {plan} | Country: {country_full}\nLogin URL: {mobile_url}\n\n"
-                            netscape_text += f".netflix.com\tTRUE\t/\tTRUE\t1893456000\tNetflixId\t{acc['cookie'].get('NetflixId')}\n"
                     except Exception as ex:
                         logger.error(f"Error: {ex}")
 
@@ -1339,7 +1348,7 @@ def handle_documents(message):
             d_final = f"{dead_count:<10}"
 
             final_box = (
-                "🚀 **اكتملت عملية الفحص السحابي بنجاح!**\n"
+                "🚀 **اكتملت عملية الفحص بنجاح!**\n"
                 "╭─────────────────────────────────╮\n"
                 "│      ✨ اكتمل الفحص بنجاح ✨      │\n"
                 "├─────────────────────────────────┤\n"
@@ -1373,7 +1382,7 @@ def handle_documents(message):
                 except:
                     pass
     finally:
-        scan_queue_lock.release()
+        user_scan_lock.release()
 
 @bot.message_handler(func=lambda message: True)
 def handle_text_message(message):
