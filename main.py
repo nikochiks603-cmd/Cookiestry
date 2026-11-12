@@ -37,13 +37,12 @@ CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 
 DB_FILE = 'database.json'
 db_lock = threading.Lock()
-scan_queue_lock = threading.Lock() # قفل لمنع تداخل فحص الملفات
+scan_queue_lock = threading.Lock()
 
 active_scans = {}
 user_languages = {}
 user_pull_sessions = {}
 
-# تصنيف البلدان حسب المناطق الكبرى المطلوبة
 REGION_COUNTRIES = {
     'AMERICA': ['US', 'CA', 'MX', 'AR', 'BR', 'CO', 'CL'],
     'EUROPE': ['FR', 'GB', 'DE', 'ES', 'IT', 'NL', 'PL', 'PT', 'RU', 'SE', 'CH', 'BE'],
@@ -62,7 +61,7 @@ COUNTRY_DATA = {
     'TR': {'ar': '🇹🇷 تركيا', 'en': '🇹🇷 Turkey'},
     'AR': {'ar': '🇦🇷 الأرجنتين', 'en': '🇦🇷 Argentina'},
     'IN': {'ar': '🇮🇳 الهند', 'en': '🇮🇳 India'},
-    'EG': {'ar': '🇪🇬 مصر', 'en': '🇪🇬 Egypt'},
+    'EG': {'ar': '🇪🇬 مصر', 'en': '🇮🇳 Egypt'},
     'SA': {'ar': '🇸🇦 السعودية', 'en': '🇸🇦 Saudi Arabia'},
     'AE': {'ar': '🇦🇪 الإمارات', 'en': '🇦🇪 UAE'},
     'MA': {'ar': '🇲🇦 المغرب', 'en': '🇲🇦 Morocco'},
@@ -193,7 +192,7 @@ def check_subscription(user_id):
     return False
 
 def send_sub_required_message(target_obj, lang='ar'):
-    markup = InlineKeyboardMarkup()
+    markup = InlineKeyboardMarkup(row_width=1)
     chat_id = target_obj.chat.id if hasattr(target_obj, 'chat') else target_obj
     if lang == 'en':
         markup.add(InlineKeyboardButton("📢 Subscribe to Channel", url=CHANNEL_LINK))
@@ -512,6 +511,9 @@ def show_main_menu(chat_id, user_id):
     lang = user_languages.get(user_id, 'ar')
     points = user_data["points"]
     
+    # استخدام row_width=1 لجعل كل زر في سطر مستقل لضمان ظهور الكتابة كاملة دون قص
+    markup = InlineKeyboardMarkup(row_width=1)
+    
     if lang == 'en':
         welcome_text = (
             f"🎬 **Welcome to the Advanced Netflix Cookie Checker Bot!**\n\n"
@@ -521,10 +523,9 @@ def show_main_menu(chat_id, user_id):
             f"👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
             "👇 **Choose an option below:**"
         )
-        markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
-            InlineKeyboardButton("👤 My Profile (/profile)", callback_data="btn_profile"),
+            InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
             InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
             InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
@@ -540,10 +541,9 @@ def show_main_menu(chat_id, user_id):
             f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
             "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
         )
-        markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
-            InlineKeyboardButton("👤 حسابي وإحصائياتي (/profile)", callback_data="btn_profile"),
+            InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
             InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
             InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
@@ -761,7 +761,6 @@ def execute_smart_pull(chat_id, user_id):
     region = session.get('region', 'ALL')
     quality = session.get('quality', 'ANY')
 
-    # حساب التكلفة: UHD بـ 1 نقطة، بينما 720p و Standard مجاناً (0 نقاط)
     cost = 1 if quality == 'UHD' else 0
 
     user_data = get_user_data(user_id)
@@ -786,7 +785,6 @@ def execute_smart_pull(chat_id, user_id):
     for acc in accounts:
         acc_country = str(acc.get('country', '')).strip().upper()
         
-        # تصفية المنطقة الكبرى
         if region != "ALL":
             allowed_countries = REGION_COUNTRIES.get(region, [])
             if acc_country not in allowed_countries:
@@ -794,7 +792,6 @@ def execute_smart_pull(chat_id, user_id):
 
         q_text = str(acc.get('video_quality', '')).upper()
         
-        # تصفية الدقة الجديدة بدقة تامة
         if quality == 'UHD':
             if 'ULTRA' not in q_text and '4K' not in q_text:
                 continue
@@ -812,7 +809,6 @@ def execute_smart_pull(chat_id, user_id):
         bot.edit_message_text(no_acc_msg, chat_id, msg_wait.message_id)
         return
 
-    # خلط القائمة بعشوائية لضمان عدم إعطاء نفس الحساب لنفس الخيار لكل المستخدمين
     random.shuffle(filtered)
 
     for acc in filtered:
@@ -827,7 +823,6 @@ def execute_smart_pull(chat_id, user_id):
         bot.edit_message_text("❌ عذراً، جميع الحسابات المطابقة لخياراتك تبين أنها تالفة أو منتهية حالياً.", chat_id, msg_wait.message_id)
         return
 
-    # خصم النقاط إذا كانت التكلفة أكبر من صفر وحفظها في قاعدة البيانات
     if cost > 0:
         update_user_points(user_id, -cost)
     
@@ -980,6 +975,7 @@ def callback_queries(call):
 
         try:
             points = get_user_data(user_id)["points"]
+            markup = InlineKeyboardMarkup(row_width=1)
             if new_lang == 'en':
                 welcome_text = (
                     f"🎬 **Welcome to the Advanced Netflix Cookie Checker Bot!**\n\n"
@@ -989,10 +985,9 @@ def callback_queries(call):
                     f"👨‍💻 **Developer:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
                     "👇 **Choose an option below:**"
                 )
-                markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
                     InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
-                    InlineKeyboardButton("👤 My Profile (/profile)", callback_data="btn_profile"),
+                    InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
                     InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
                     InlineKeyboardButton("📢 Bot Channel", url=CHANNEL_LINK)
@@ -1008,10 +1003,9 @@ def callback_queries(call):
                     f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
                     "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
                 )
-                markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
                     InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
-                    InlineKeyboardButton("👤 حسابي وإحصائياتي (/profile)", callback_data="btn_profile"),
+                    InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
                     InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
                     InlineKeyboardButton("📢 قناة البوت", url=CHANNEL_LINK)
@@ -1054,15 +1048,15 @@ def callback_queries(call):
     elif data == "btn_pull_region":
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
             InlineKeyboardButton("🌐 أي منطقة (عشوائي)", callback_data="pull_r_ALL"),
             InlineKeyboardButton("🇺🇸 أمريكا", callback_data="pull_r_AMERICA"),
             InlineKeyboardButton("🇪🇺 أوروبا", callback_data="pull_r_EUROPE"),
             InlineKeyboardButton("🕌 الشرق الأوسط", callback_data="pull_r_MIDDLE_EAST"),
-            InlineKeyboardButton("🌏 آسيا", callback_data="pull_r_ASIA")
+            InlineKeyboardButton("🌏 آسيا", callback_data="pull_r_ASIA"),
+            InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_menu")
         )
-        markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_menu"))
         msg_txt = "🌍 **Step 1: Select Region:**" if lang == 'en' else "🌍 **الخطوة 1: اختر المنطقة المطلوبة:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -1076,9 +1070,9 @@ def callback_queries(call):
         markup.add(
             InlineKeyboardButton("🌟 Ultra 4K / UHD (+1 Point)", callback_data="pull_q_UHD"),
             InlineKeyboardButton("📺 HD (720p) (مجاني 0 نقاط)", callback_data="pull_q_HD720"),
-            InlineKeyboardButton("🎬 Standard (مجاني 0 نقاط)", callback_data="pull_q_STANDARD")
+            InlineKeyboardButton("🎬 Standard (مجاني 0 نقاط)", callback_data="pull_q_STANDARD"),
+            InlineKeyboardButton("🔙 رجوع لاختيار المنطقة", callback_data="btn_pull_region")
         )
-        markup.add(InlineKeyboardButton("🔙 رجوع لاختيار المنطقة", callback_data="btn_pull_region"))
         msg_txt = "📺 **Step 2: Select Video Quality:**" if lang == 'en' else "📺 **الخطوة 2: اختر دقة الحساب المطلوبة:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -1128,7 +1122,6 @@ def handle_documents(message):
         send_sub_required_message(message, lang)
         return
 
-    # نظام الطابور (Queue Lock) لمنع فحص ملفين في نفس الوقت وتجنب حظر البوت
     if not scan_queue_lock.acquire(blocking=False):
         bot.reply_to(message, "⏳ **هناك عملية فحص جارية حالياً لملف آخر.**\nيرجى الانتظار حتى تنتهي العملية الحالية ليتم بدء فحص ملفك تلقائياً.", parse_mode='Markdown')
         return
@@ -1139,7 +1132,7 @@ def handle_documents(message):
 
         temp_dirs = []
         try:
-            markup = InlineKeyboardMarkup()
+            markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
             
             initial_progress = (
