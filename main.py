@@ -37,10 +37,19 @@ CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 
 DB_FILE = 'database.json'
 db_lock = threading.Lock()
+scan_queue_lock = threading.Lock() # قفل لمنع تداخل فحص الملفات
 
 active_scans = {}
 user_languages = {}
 user_pull_sessions = {}
+
+# تصنيف البلدان حسب المناطق الكبرى المطلوبة
+REGION_COUNTRIES = {
+    'AMERICA': ['US', 'CA', 'MX', 'AR', 'BR', 'CO', 'CL'],
+    'EUROPE': ['FR', 'GB', 'DE', 'ES', 'IT', 'NL', 'PL', 'PT', 'RU', 'SE', 'CH', 'BE'],
+    'MIDDLE_EAST': ['SA', 'AE', 'QA', 'KW', 'IQ', 'JO', 'LB', 'EG', 'DZ', 'MA', 'TN'],
+    'ASIA': ['TR', 'JP', 'KR', 'IN']
+}
 
 COUNTRY_DATA = {
     'US': {'ar': '🇺🇸 الولايات المتحدة', 'en': '🇺🇸 United States'},
@@ -514,7 +523,7 @@ def show_main_menu(chat_id, user_id):
         )
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_country"),
+            InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
             InlineKeyboardButton("👤 My Profile (/profile)", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
             InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
@@ -527,13 +536,13 @@ def show_main_menu(chat_id, user_id):
             f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
             f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
             "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
-            "🔹 سحب حساب ذكي حسب الجودة وتاريخ الاشتراك.\n"
+            "🔹 سحب حساب ذكي حسب المنطقة والجودة.\n"
             f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
             "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
         )
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_country"),
+            InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
             InlineKeyboardButton("👤 حسابي وإحصائياتي (/profile)", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
             InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
@@ -749,15 +758,11 @@ def execute_smart_pull(chat_id, user_id):
         return
 
     session = user_pull_sessions.get(user_id, {})
-    country = session.get('country', 'ALL')
+    region = session.get('region', 'ALL')
     quality = session.get('quality', 'ANY')
-    age = session.get('age', 'ANY')
 
-    cost = 1
-    if quality == '4K':
-        cost += 1
-    if age == 'OLD':
-        cost += 1
+    # حساب التكلفة: UHD بـ 1 نقطة، بينما 720p و Standard مجاناً (0 نقاط)
+    cost = 1 if quality == 'UHD' else 0
 
     user_data = get_user_data(user_id)
     if user_data["points"] < cost:
@@ -780,40 +785,34 @@ def execute_smart_pull(chat_id, user_id):
     filtered = []
     for acc in accounts:
         acc_country = str(acc.get('country', '')).strip().upper()
-        if country != "ALL" and acc_country != country.strip().upper():
-            continue
-            
+        
+        # تصفية المنطقة الكبرى
+        if region != "ALL":
+            allowed_countries = REGION_COUNTRIES.get(region, [])
+            if acc_country not in allowed_countries:
+                continue
+
         q_text = str(acc.get('video_quality', '')).upper()
-        if quality == '4K' and 'ULTRA' not in q_text and '4K' not in q_text:
-            continue
-        elif quality == 'HD' and 'ULTRA' in q_text:
-            continue
-
-        member_since_raw = str(acc.get('member_since_raw', ''))
-        year_match = re.search(r'(20\d\d|19\d\d)', member_since_raw)
-        acc_year = int(year_match.group(1)) if year_match else 2021
-
-        # تعديل فلترة السنوات بدقة تامة حسب طلب المستخدم
-        if age == 'OLD' and acc_year > 2020:
-            continue
-        elif age == 'NEW' and acc_year <= 2020:
-            continue
+        
+        # تصفية الدقة الجديدة بدقة تامة
+        if quality == 'UHD':
+            if 'ULTRA' not in q_text and '4K' not in q_text:
+                continue
+        elif quality == 'HD720':
+            if '720' not in q_text and 'HD' not in q_text and 'STANDARD' in q_text:
+                continue
+        elif quality == 'STANDARD':
+            if 'STANDARD' not in q_text and 'BASIC' not in q_text:
+                continue
 
         filtered.append(acc)
 
-    # التحقق الصارم: إذا لم يتم العثور على حسابات مطابقة للتاريخ القديم (2020 وأقل) أو الحديث
     if not filtered:
-        if age == 'OLD':
-            no_acc_msg = "❌ عذراً، لا توجد حالياً حسابات قديمة مطابقة (2020 وأقل) في الذاكرة!" if lang == 'ar' else "❌ Sorry, no accounts from 2020 or older available right now!"
-        elif age == 'NEW':
-            no_acc_msg = "❌ عذراً، لا توجد حالياً حسابات حديثة مطابقة (بعد 2020) في الذاكرة!" if lang == 'ar' else "❌ Sorry, no new accounts available right now!"
-        else:
-            no_acc_msg = "❌ عذراً، لا توجد حسابات مطابقة لخياراتك حالياً في الذاكرة!" if lang == 'ar' else "❌ Sorry, no matching accounts available right now!"
-        
+        no_acc_msg = "❌ عذراً، لا توجد حسابات مطابقة لهذه المنطقة والدقة حالياً في الذاكرة!" if lang == 'ar' else "❌ Sorry, no matching accounts available right now!"
         bot.edit_message_text(no_acc_msg, chat_id, msg_wait.message_id)
         return
 
-    # خلط القائمة بعشوائية تامة لمنع إعطاء نفس الحساب لنفس الخيار لكل المستخدمين
+    # خلط القائمة بعشوائية لضمان عدم إعطاء نفس الحساب لنفس الخيار لكل المستخدمين
     random.shuffle(filtered)
 
     for acc in filtered:
@@ -828,8 +827,10 @@ def execute_smart_pull(chat_id, user_id):
         bot.edit_message_text("❌ عذراً، جميع الحسابات المطابقة لخياراتك تبين أنها تالفة أو منتهية حالياً.", chat_id, msg_wait.message_id)
         return
 
-    # خصم النقاط وحفظها بشكل صحيح ودائم في قاعدة البيانات
-    update_user_points(user_id, -cost)
+    # خصم النقاط إذا كانت التكلفة أكبر من صفر وحفظها في قاعدة البيانات
+    if cost > 0:
+        update_user_points(user_id, -cost)
+    
     increment_user_stats(user_id, pulled=1)
 
     db = load_db()
@@ -990,7 +991,7 @@ def callback_queries(call):
                 )
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
-                    InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_country"),
+                    InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
                     InlineKeyboardButton("👤 My Profile (/profile)", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
                     InlineKeyboardButton("💳 Recharge Points", callback_data="btn_recharge"),
@@ -1003,13 +1004,13 @@ def callback_queries(call):
                     f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
                     f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
                     "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
-                    "🔹 سحب حساب ذكي حسب الجودة وتاريخ الاشتراك.\n"
+                    "🔹 سحب حساب ذكي حسب المنطقة والجودة.\n"
                     f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
                     "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
                 )
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
-                    InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_country"),
+                    InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
                     InlineKeyboardButton("👤 حسابي وإحصائياتي (/profile)", callback_data="btn_profile"),
                     InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
                     InlineKeyboardButton("💳 شحن النقاط", callback_data="btn_recharge"),
@@ -1050,57 +1051,40 @@ def callback_queries(call):
     elif data == "back_to_menu":
         show_main_menu(chat_id, user_id)
             
-    elif data == "btn_pull_country":
+    elif data == "btn_pull_region":
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("🌐 أي دولة (عشوائي)", callback_data="pull_c_ALL"),
-            InlineKeyboardButton("🇺🇸 أمريكا (US)", callback_data="pull_c_US"),
-            InlineKeyboardButton("🇫🇷 فرنسا (FR)", callback_data="pull_c_FR"),
-            InlineKeyboardButton("🇬🇧 بريطانيا (GB)", callback_data="pull_c_GB"),
-            InlineKeyboardButton("🇹🇷 تركيا (TR)", callback_data="pull_c_TR"),
-            InlineKeyboardButton("🇩🇿 الجزائر (DZ)", callback_data="pull_c_DZ"),
-            InlineKeyboardButton("🇸🇦 السعودية (SA)", callback_data="pull_c_SA")
+            InlineKeyboardButton("🌐 أي منطقة (عشوائي)", callback_data="pull_r_ALL"),
+            InlineKeyboardButton("🇺🇸 أمريكا", callback_data="pull_r_AMERICA"),
+            InlineKeyboardButton("🇪🇺 أوروبا", callback_data="pull_r_EUROPE"),
+            InlineKeyboardButton("🕌 الشرق الأوسط", callback_data="pull_r_MIDDLE_EAST"),
+            InlineKeyboardButton("🌏 آسيا", callback_data="pull_r_ASIA")
         )
         markup.add(InlineKeyboardButton("🔙 رجوع للقائمة الرئيسية", callback_data="back_to_menu"))
-        msg_txt = "🌍 **Step 1: Select Country:**" if lang == 'en' else "🌍 **الخطوة 1: اختر الدولة المطلوبة:**"
+        msg_txt = "🌍 **Step 1: Select Region:**" if lang == 'en' else "🌍 **الخطوة 1: اختر المنطقة المطلوبة:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
-    elif data.startswith("pull_c_"):
-        c_code = data.replace("pull_c_", "")
+    elif data.startswith("pull_r_"):
+        r_code = data.replace("pull_r_", "")
         if user_id not in user_pull_sessions:
             user_pull_sessions[user_id] = {}
-        user_pull_sessions[user_id]['country'] = c_code
+        user_pull_sessions[user_id]['region'] = r_code
 
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
-            InlineKeyboardButton("📺 Ultra 4K (+1 Point)", callback_data="pull_q_4K"),
-            InlineKeyboardButton("📺 HD / Standard (0 Points extra)", callback_data="pull_q_HD"),
-            InlineKeyboardButton("⚡ أي جودة (0 Points extra)", callback_data="pull_q_ANY")
+            InlineKeyboardButton("🌟 Ultra 4K / UHD (+1 Point)", callback_data="pull_q_UHD"),
+            InlineKeyboardButton("📺 HD (720p) (مجاني 0 نقاط)", callback_data="pull_q_HD720"),
+            InlineKeyboardButton("🎬 Standard (مجاني 0 نقاط)", callback_data="pull_q_STANDARD")
         )
-        markup.add(InlineKeyboardButton("🔙 رجوع لاختيار الدولة", callback_data="btn_pull_country"))
-        msg_txt = "📺 **Step 2: Select Video Quality:**\n(Ultra 4K costs +1 extra point)" if lang == 'en' else "📺 **الخطوة 2: اختر جودة الحساب:**\n(Ultra 4K تزيد نقطة إضافية)"
+        markup.add(InlineKeyboardButton("🔙 رجوع لاختيار المنطقة", callback_data="btn_pull_region"))
+        msg_txt = "📺 **Step 2: Select Video Quality:**" if lang == 'en' else "📺 **الخطوة 2: اختر دقة الحساب المطلوبة:**"
         bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
     elif data.startswith("pull_q_"):
         q_type = data.replace("pull_q_", "")
         user_pull_sessions[user_id]['quality'] = q_type
-
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton("⏳ تاريخ قديم 2020 وأقل (+1 Point)", callback_data="pull_a_OLD"),
-            InlineKeyboardButton("🆕 تاريخ حديث بعد 2020 (0 Points extra)", callback_data="pull_a_NEW"),
-            InlineKeyboardButton("⚡ أي تاريخ (0 Points extra)", callback_data="pull_a_ANY")
-        )
-        saved_country = user_pull_sessions[user_id].get('country', 'ALL')
-        markup.add(InlineKeyboardButton("🔙 رجوع لاختيار الجودة", callback_data=f"pull_c_{saved_country}"))
-        msg_txt = "📅 **Step 3: Select Account Age / Subscription Date:**\n(Accounts from 2020 or older cost +1 extra point)" if lang == 'en' else "📅 **الخطوة 3: اختر تاريخ الاشتراك (عمر الحساب):**\n(الحسابات القديمة 2020 وما قبلها تزيد نقطة إضافية)"
-        bot.edit_message_text(msg_txt, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif data.startswith("pull_a_"):
-        a_type = data.replace("pull_a_", "")
-        user_pull_sessions[user_id]['age'] = a_type
         execute_smart_pull(chat_id, user_id)
 
     elif data == "btn_replace":
@@ -1144,246 +1128,254 @@ def handle_documents(message):
         send_sub_required_message(message, lang)
         return
 
-    stop_event = threading.Event()
-    active_scans[user_id] = stop_event
+    # نظام الطابور (Queue Lock) لمنع فحص ملفين في نفس الوقت وتجنب حظر البوت
+    if not scan_queue_lock.acquire(blocking=False):
+        bot.reply_to(message, "⏳ **هناك عملية فحص جارية حالياً لملف آخر.**\nيرجى الانتظار حتى تنتهي العملية الحالية ليتم بدء فحص ملفك تلقائياً.", parse_mode='Markdown')
+        return
 
-    temp_dirs = []
     try:
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
-        
-        initial_progress = (
-            "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
-            "╭─────────────────────────────────╮\n"
-            "│         ✨ ملخص الفحص ✨          │\n"
-            "├─────────────────────────────────┤\n"
-            "│  🗃️  الإجمالي         0         │\n"
-            "│  ⏳  تم الفحص         0         │\n"
-            "│  🟢  تعمل             0         │\n"
-            "│  🔴  لا تعمل          0         │\n"
-            "├─────────────────────────────────┤\n"
-            "│  [░░░░░░░░░░░░░░░░░░░░] 0%      │\n"
-            "╰─────────────────────────────────╯"
-        )
-        msg_wait = bot.reply_to(message, initial_progress, parse_mode='Markdown', reply_markup=markup)
-        
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        filename = message.document.file_name
-        unique_dir = tempfile.mkdtemp(prefix=f"netflix_bot_{uuid.uuid4().hex}_")
-        temp_dirs.append(unique_dir)
-        
-        file_path = os.path.join(unique_dir, filename)
-        with open(file_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
+        stop_event = threading.Event()
+        active_scans[user_id] = stop_event
+
+        temp_dirs = []
+        try:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🛑 إيقاف الفحص" if lang == 'ar' else "🛑 Stop Scan", callback_data="stop_scan"))
             
-        txt_files_to_check = []
-        if filename.lower().endswith('.zip'):
-            txt_files_to_check = extract_zip_and_get_files(file_path, unique_dir)
-        elif filename.lower().endswith('.txt'):
-            txt_files_to_check = [file_path]
+            initial_progress = (
+                "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
+                "╭─────────────────────────────────╮\n"
+                "│         ✨ ملخص الفحص ✨          │\n"
+                "├─────────────────────────────────┤\n"
+                "│  🗃️  الإجمالي         0         │\n"
+                "│  ⏳  تم الفحص         0         │\n"
+                "│  🟢  تعمل             0         │\n"
+                "│  🔴  لا تعمل          0         │\n"
+                "├─────────────────────────────────┤\n"
+                "│  [░░░░░░░░░░░░░░░░░░░░] 0%      │\n"
+                "╰─────────────────────────────────╯"
+            )
+            msg_wait = bot.reply_to(message, initial_progress, parse_mode='Markdown', reply_markup=markup)
             
-        if not txt_files_to_check:
-            bot.edit_message_text("❌ No valid text files found.", message.chat.id, msg_wait.message_id)
-            if user_id in active_scans:
-                del active_scans[user_id]
-            return
+            file_info = bot.get_file(message.document.file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
             
-        all_lines = []
-        for txt_file in txt_files_to_check:
-            try:
-                with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    all_lines.extend(f.readlines())
-            except:
-                pass
+            filename = message.document.file_name
+            unique_dir = tempfile.mkdtemp(prefix=f"netflix_bot_{uuid.uuid4().hex}_")
+            temp_dirs.append(unique_dir)
+            
+            file_path = os.path.join(unique_dir, filename)
+            with open(file_path, 'wb') as new_file:
+                new_file.write(downloaded_file)
+                
+            txt_files_to_check = []
+            if filename.lower().endswith('.zip'):
+                txt_files_to_check = extract_zip_and_get_files(file_path, unique_dir)
+            elif filename.lower().endswith('.txt'):
+                txt_files_to_check = [file_path]
+                
+            if not txt_files_to_check:
+                bot.edit_message_text("❌ No valid text files found.", message.chat.id, msg_wait.message_id)
+                if user_id in active_scans:
+                    del active_scans[user_id]
+                return
+                
+            all_lines = []
+            for txt_file in txt_files_to_check:
+                try:
+                    with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        all_lines.extend(f.readlines())
+                except:
+                    pass
 
-        total_lines = len(all_lines)
-        db = load_db()
-        db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + total_lines
-        save_db(db)
-        
-        increment_user_stats(user_id, checked=total_lines)
+            total_lines = len(all_lines)
+            db = load_db()
+            db["stats"]["checked"] = db.get("stats", {}).get("checked", 0) + total_lines
+            save_db(db)
+            
+            increment_user_stats(user_id, checked=total_lines)
 
-        valid_count = 0
-        dead_count = 0
-        checked_so_far = 0
+            valid_count = 0
+            dead_count = 0
+            checked_so_far = 0
 
-        valid_accounts_text = "========================================\n"
-        valid_accounts_text += f"NETFLIX VALID ACCOUNTS REPORT - Dev: {OWNER_CREDIT}\n"
-        valid_accounts_text += "========================================\n\n"
-        netscape_text = "# Netscape HTTP Cookie File\n\n"
+            valid_accounts_text = "========================================\n"
+            valid_accounts_text += f"NETFLIX VALID ACCOUNTS REPORT - Dev: {OWNER_CREDIT}\n"
+            valid_accounts_text += "========================================\n\n"
+            netscape_text = "# Netscape HTTP Cookie File\n\n"
 
-        lock = threading.Lock()
+            lock = threading.Lock()
 
-        def process_line(line):
-            nonlocal checked_so_far, valid_count, dead_count
-            if stop_event.is_set():
-                return None
-            try:
-                parsed = extract_netflix_id(line)
-                if not parsed:
+            def process_line(line):
+                nonlocal checked_so_far, valid_count, dead_count
+                if stop_event.is_set():
+                    return None
+                try:
+                    parsed = extract_netflix_id(line)
+                    if not parsed:
+                        with lock:
+                            checked_so_far += 1
+                            dead_count += 1
+                        return None
+                    time.sleep(0.2)
+                    account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
+                    if stop_event.is_set():
+                        return None
+
+                    if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown" and account_info.get('on_payment_hold') != 'Yes':
+                        token_result = generate_token(parsed["value"])
+                        if token_result.get('status') == 'Success':
+                            account_info['token_result'] = token_result
+                            add_account_to_db(account_info)
+                            with lock:
+                                checked_so_far += 1
+                                valid_count += 1
+                            return account_info
+                    
                     with lock:
                         checked_so_far += 1
                         dead_count += 1
-                    return None
-                time.sleep(0.2)
-                account_info = check_netflix_cookie({"NetflixId": parsed["value"]})
-                if stop_event.is_set():
-                    return None
+                except Exception as e:
+                    logger.error(f"Error: {e}")
+                    with lock:
+                        checked_so_far += 1
+                        dead_count += 1
+                return None
 
-                if account_info["ok"] and account_info.get('plan') != "Unknown" and account_info.get('next_billing') != "Unknown" and account_info.get('on_payment_hold') != 'Yes':
-                    token_result = generate_token(parsed["value"])
-                    if token_result.get('status') == 'Success':
-                        account_info['token_result'] = token_result
-                        add_account_to_db(account_info)
-                        with lock:
-                            checked_so_far += 1
-                            valid_count += 1
-                        return account_info
-                
-                with lock:
-                    checked_so_far += 1
-                    dead_count += 1
-            except Exception as e:
-                logger.error(f"Error: {e}")
-                with lock:
-                    checked_so_far += 1
-                    dead_count += 1
-            return None
+            def update_progress_bar():
+                last_text = ""
+                while checked_so_far < total_lines and not stop_event.is_set():
+                    time.sleep(2)
+                    with lock:
+                        curr_checked = checked_so_far
+                        curr_valid = valid_count
+                        curr_dead = dead_count
+                    
+                    pct = int((curr_checked / total_lines) * 100) if total_lines > 0 else 0
+                    filled = int(pct / 5)
+                    bar = "█" * filled + "░" * (20 - filled)
 
-        def update_progress_bar():
-            last_text = ""
-            while checked_so_far < total_lines and not stop_event.is_set():
-                time.sleep(2)
-                with lock:
-                    curr_checked = checked_so_far
-                    curr_valid = valid_count
-                    curr_dead = dead_count
-                
-                pct = int((curr_checked / total_lines) * 100) if total_lines > 0 else 0
-                filled = int(pct / 5)
-                bar = "█" * filled + "░" * (20 - filled)
+                    t_str = f"{total_lines:<9}"
+                    c_str = f"{curr_checked:<9}"
+                    v_str = f"{curr_valid:<13}"
+                    d_str = f"{curr_dead:<10}"
+                    pct_str = f"{pct}%"
 
-                t_str = f"{total_lines:<9}"
-                c_str = f"{curr_checked:<9}"
-                v_str = f"{curr_valid:<13}"
-                d_str = f"{curr_dead:<10}"
-                pct_str = f"{pct}%"
+                    status_str = (
+                        "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
+                        "╭─────────────────────────────────╮\n"
+                        "│         ✨ ملخص الفحص ✨          │\n"
+                        "├─────────────────────────────────┤\n"
+                        f"│  🗃️  الإجمالي    {t_str} │\n"
+                        f"│  ⏳  تم الفحص    {c_str} │\n"
+                        f"│  🟢  تعمل        {v_str} │\n"
+                        f"│  🔴  لا تعمل     {d_str} │\n"
+                        "├─────────────────────────────────┤\n"
+                        f"│  [{bar}] {pct_str:<6} │\n"
+                        "╰─────────────────────────────────╯"
+                    )
 
-                status_str = (
-                    "🚀 **نظام التحليل السحابي والفحص الذكي قيد التشغيل...**\n"
-                    "╭─────────────────────────────────╮\n"
-                    "│         ✨ ملخص الفحص ✨          │\n"
-                    "├─────────────────────────────────┤\n"
-                    f"│  🗃️  الإجمالي    {t_str} │\n"
-                    f"│  ⏳  تم الفحص    {c_str} │\n"
-                    f"│  🟢  تعمل        {v_str} │\n"
-                    f"│  🔴  لا تعمل     {d_str} │\n"
-                    "├─────────────────────────────────┤\n"
-                    f"│  [{bar}] {pct_str:<6} │\n"
-                    "╰─────────────────────────────────╯"
-                )
+                    if status_str != last_text:
+                        try:
+                            bot.edit_message_text(status_str, message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
+                            last_text = status_str
+                        except:
+                            pass
 
-                if status_str != last_text:
+            progress_thread = threading.Thread(target=update_progress_bar, daemon=True)
+            progress_thread.start()
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(process_line, line.strip()) for line in all_lines if line.strip()]
+                for future in as_completed(futures):
+                    if stop_event.is_set():
+                        break
                     try:
-                        bot.edit_message_text(status_str, message.chat.id, msg_wait.message_id, parse_mode='Markdown', reply_markup=markup)
-                        last_text = status_str
-                    except:
-                        pass
-
-        progress_thread = threading.Thread(target=update_progress_bar, daemon=True)
-        progress_thread.start()
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(process_line, line.strip()) for line in all_lines if line.strip()]
-            for future in as_completed(futures):
-                if stop_event.is_set():
-                    break
-                try:
-                    acc = future.result()
-                    if acc:
-                        email = acc['email'].replace(chr(92) + 'x40', '@')
-                        plan = acc['plan']
-                        country_full = get_country_name(acc['country'], lang)
-                        expiry = acc['next_billing']
-                        member_since = acc['member_since']
-                        profiles = acc['profiles']
-                        price = acc['plan_price']
-                        quality = acc['video_quality']
-                        
-                        token_result = acc.get('token_result', {})
-                        token_val = token_result.get('token', 'N/A')
-                        mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
-
-                        if lang == 'en':
-                            res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
-                            res_msg += f"🌍 Country: `{country_full}`\n"
-                            res_msg += f"📦 Plan: `{plan}`\n"
-                            res_msg += f"💰 Price: `{price}`\n"
-                            res_msg += f"📺 Quality: `{quality}`\n"
-                            res_msg += f"📅 Member Since (Age): `{member_since}`\n"
-                            res_msg += f"🔄 Next Billing: `{expiry}`\n"
-                            res_msg += f"👥 Profiles: `{profiles}`\n"
-                            res_msg += f"📧 Email: `{email}`\n"
-                            res_msg += f"\n📱 **Login URL:**\n`{mobile_url}`"
-                        else:
-                            res_msg = "🎬 **حساب NETFLIX صالح وفعال** 🎬\n\n"
-                            res_msg += f"🌍 البلد: `{country_full}`\n"
-                            res_msg += f"📦 الباقة: `{plan}`\n"
-                            res_msg += f"💰 السعر: `{price}`\n"
-                            res_msg += f"📺 الجودة: `{quality}`\n"
-                            res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{member_since}`\n"
-                            res_msg += f"🔄 تاريخ التجديد: `{expiry}`\n"
-                            res_msg += f"👥 البروفايلات: `{profiles}`\n"
-                            res_msg += f"📧 البريد: `{email}`\n"
-                            res_msg += f"\n📱 **رابط الدخول المباشر:**\n`{mobile_url}`"
+                        acc = future.result()
+                        if acc:
+                            email = acc['email'].replace(chr(92) + 'x40', '@')
+                            plan = acc['plan']
+                            country_full = get_country_name(acc['country'], lang)
+                            expiry = acc['next_billing']
+                            member_since = acc['member_since']
+                            profiles = acc['profiles']
+                            price = acc['plan_price']
+                            quality = acc['video_quality']
                             
-                        bot.send_message(message.chat.id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
-                        
-                        valid_accounts_text += f"Email: {email}\nPlan: {plan} | Country: {country_full}\nLogin URL: {mobile_url}\n\n"
-                        netscape_text += f".netflix.com\tTRUE\t/\tTRUE\t1893456000\tNetflixId\t{acc['cookie'].get('NetflixId')}\n"
-                except Exception as ex:
-                    logger.error(f"Error: {ex}")
+                            token_result = acc.get('token_result', {})
+                            token_val = token_result.get('token', 'N/A')
+                            mobile_url = token_result.get('direct_login_url', f"https://netflix.com/unsupported?nftoken={token_val}")
 
-        t_final = f"{total_lines:<9}"
-        v_final = f"{valid_count:<13}"
-        d_final = f"{dead_count:<10}"
+                            if lang == 'en':
+                                res_msg = "🎬 **Active NETFLIX Account** 🎬\n\n"
+                                res_msg += f"🌍 Country: `{country_full}`\n"
+                                res_msg += f"📦 Plan: `{plan}`\n"
+                                res_msg += f"💰 Price: `{price}`\n"
+                                res_msg += f"📺 Quality: `{quality}`\n"
+                                res_msg += f"📅 Member Since (Age): `{member_since}`\n"
+                                res_msg += f"🔄 Next Billing: `{expiry}`\n"
+                                res_msg += f"👥 Profiles: `{profiles}`\n"
+                                res_msg += f"📧 Email: `{email}`\n"
+                                res_msg += f"\n📱 **Login URL:**\n`{mobile_url}`"
+                            else:
+                                res_msg = "🎬 **حساب NETFLIX صالح وفعال** 🎬\n\n"
+                                res_msg += f"🌍 البلد: `{country_full}`\n"
+                                res_msg += f"📦 الباقة: `{plan}`\n"
+                                res_msg += f"💰 السعر: `{price}`\n"
+                                res_msg += f"📺 الجودة: `{quality}`\n"
+                                res_msg += f"📅 تاريخ الاشتراك (عمر الحساب): `{member_since}`\n"
+                                res_msg += f"🔄 تاريخ التجديد: `{expiry}`\n"
+                                res_msg += f"👥 البروفايلات: `{profiles}`\n"
+                                res_msg += f"📧 البريد: `{email}`\n"
+                                res_msg += f"\n📱 **رابط الدخول المباشر:**\n`{mobile_url}`"
+                                
+                            bot.send_message(message.chat.id, res_msg, parse_mode='Markdown', disable_web_page_preview=True)
+                            
+                            valid_accounts_text += f"Email: {email}\nPlan: {plan} | Country: {country_full}\nLogin URL: {mobile_url}\n\n"
+                            netscape_text += f".netflix.com\tTRUE\t/\tTRUE\t1893456000\tNetflixId\t{acc['cookie'].get('NetflixId')}\n"
+                    except Exception as ex:
+                        logger.error(f"Error: {ex}")
 
-        final_box = (
-            "🚀 **اكتملت عملية الفحص السحابي بنجاح!**\n"
-            "╭─────────────────────────────────╮\n"
-            "│      ✨ اكتمل الفحص بنجاح ✨      │\n"
-            "├─────────────────────────────────┤\n"
-            f"│  🗃️  الإجمالي    {t_final} │\n"
-            f"│  🟢  تعمل        {v_final} │\n"
-            f"│  🔴  لا تعمل     {d_final} │\n"
-            "├─────────────────────────────────┤\n"
-            "│  [████████████████████] 100%    │\n"
-            "╰─────────────────────────────────╯"
-        )
-        try:
-            bot.edit_message_text(final_box, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
-        except:
-            pass
+            t_final = f"{total_lines:<9}"
+            v_final = f"{valid_count:<13}"
+            d_final = f"{dead_count:<10}"
 
-        if valid_count > 0:
-            result_file_path = os.path.join(unique_dir, "valid_accounts.txt")
-            with open(result_file_path, 'w', encoding='utf-8') as rf:
-                rf.write(valid_accounts_text)
-            with open(result_file_path, 'rb') as rf:
-                bot.send_document(message.chat.id, rf, caption="📁 Valid accounts summary file.")
-
-    except Exception as e:
-        bot.reply_to(message, f"❌ Error: {str(e)}")
-    finally:
-        if user_id in active_scans:
-            del active_scans[user_id]
-        for temp_dir in temp_dirs:
+            final_box = (
+                "🚀 **اكتملت عملية الفحص السحابي بنجاح!**\n"
+                "╭─────────────────────────────────╮\n"
+                "│      ✨ اكتمل الفحص بنجاح ✨      │\n"
+                "├─────────────────────────────────┤\n"
+                f"│  🗃️  الإجمالي    {t_final} │\n"
+                f"│  🟢  تعمل        {v_final} │\n"
+                f"│  🔴  لا تعمل     {d_final} │\n"
+                "├─────────────────────────────────┤\n"
+                "│  [████████████████████] 100%    │\n"
+                "╰─────────────────────────────────╯"
+            )
             try:
-                shutil.rmtree(temp_dir)
+                bot.edit_message_text(final_box, message.chat.id, msg_wait.message_id, parse_mode='Markdown')
             except:
                 pass
+
+            if valid_count > 0:
+                result_file_path = os.path.join(unique_dir, "valid_accounts.txt")
+                with open(result_file_path, 'w', encoding='utf-8') as rf:
+                    rf.write(valid_accounts_text)
+                with open(result_file_path, 'rb') as rf:
+                    bot.send_document(message.chat.id, rf, caption="📁 Valid accounts summary file.")
+
+        except Exception as e:
+            bot.reply_to(message, f"❌ Error: {str(e)}")
+        finally:
+            if user_id in active_scans:
+                del active_scans[user_id]
+            for temp_dir in temp_dirs:
+                try:
+                    shutil.rmtree(temp_dir)
+                except:
+                    pass
+    finally:
+        scan_queue_lock.release()
 
 @bot.message_handler(func=lambda message: True)
 def handle_text_message(message):
