@@ -297,12 +297,10 @@ def extract_next_billing_date(response_text):
         logger.error(f"Error extracting billing date: {e}")
     return "Unknown"
 
-# نظام موازنة الحمل وتوزيع الطلبات بين رابورات الفحص (Load Balancer & Multi-Endpoint Check)
 def check_netflix_cookie(cookie_dict):
     session = requests.Session()
     session.cookies.update(cookie_dict)
     
-    # توزيع الطلبات على مسارات نيتفليكس لمنع البلوك والتقليل من الضغط (Load Balancing)
     endpoints = [
         'https://www.netflix.com/YourAccount',
         'https://www.netflix.com/youraccount'
@@ -1206,7 +1204,6 @@ def handle_documents(message):
 
             lock = threading.Lock()
 
-            # تقسيم وتقسيم المهام على مجموعات متوازية لتفادي البلوك
             def process_line(line):
                 nonlocal checked_so_far, valid_count, dead_count
                 if stop_event.is_set():
@@ -1286,7 +1283,6 @@ def handle_documents(message):
             progress_thread = threading.Thread(target=update_progress_bar, daemon=True)
             progress_thread.start()
 
-            # استخدام مسارين متوازيين موزعين لتوزيع الضغط ومنع الـ Lag
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [executor.submit(process_line, line.strip()) for line in all_lines if line.strip()]
                 for future in as_completed(futures):
