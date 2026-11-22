@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 OWNER_CREDIT = "@farxxes"
 OWNER_LINK = "https://t.me/farxxes"
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8890151932:AAGHgPOiXAKwA_Z2b6ZAHPbHFrHSmYKJKxM')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8795234711:AAFWROowv0uHXfHrvVnqYlMUUM1amTAjedA')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = [8713916851]
