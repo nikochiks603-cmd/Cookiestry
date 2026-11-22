@@ -1106,7 +1106,7 @@ def execute_smart_pull(chat_id, user_id):
         res_msg += f"👥 Profiles: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 Email: `{email}`\n"
         res_msg += f"🪙 Points Deducted: `{cost}` | Remaining: `{remaining_points}`\n"
-        res_msg += f"\n📱 **Direct Login URL (Fresh):**\n`{mobile_url}`"
+        res_msg += f"\n📱 **Direct Login URL :**\n`{mobile_url}`"
     else:
         res_msg = "🎬 **تم سحب حساب NETFLIX بنجاح** 🎬\n\n"
         res_msg += f"🌍 البلد: `{country_full}`\n"
@@ -1119,7 +1119,7 @@ def execute_smart_pull(chat_id, user_id):
         res_msg += f"👥 البروفايلات: `{selected_account.get('profiles', 'Unknown')}`\n"
         res_msg += f"📧 البريد: `{email}`\n"
         res_msg += f"🪙 النقاط المسحوبة: `{cost}` | رصيدك المتبقي: `{remaining_points}` نقطة\n"
-        res_msg += f"\n📱 **رابط الدخول المباشر (طازج):**\n`{mobile_url}`"
+        res_msg += f"\n📱 **رابط الدخول المباشر ():**\n`{mobile_url}`"
 
     if msg_wait:
         safe_edit_message(res_msg, chat_id, msg_wait.message_id, parse_mode='Markdown', disable_web_page_preview=True, reply_markup=device_markup)
@@ -1256,7 +1256,7 @@ def callback_queries(call):
                 "👇 **Choose an option below:**"
             )
             markup.add(
-                InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
+                InlineKeyboardButton("🎟️ Pull Account (netflix)", callback_data="btn_pull_region"),
                 InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
                 InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
                 InlineKeyboardButton("💳 Recharge Points & Invite", callback_data="btn_recharge"),
@@ -1274,7 +1274,7 @@ def callback_queries(call):
                 "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
             )
             markup.add(
-                InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
+                InlineKeyboardButton("🎟️ سحب حساب (نتفلكس)", callback_data="btn_pull_region"),
                 InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
                 InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
                 InlineKeyboardButton("💳 شحن النقاط ودعوة الأصدقاء", callback_data="btn_recharge"),
