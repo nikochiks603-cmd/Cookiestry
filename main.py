@@ -2,6 +2,7 @@ import os
 import re
 import json
 import time
+import queue
 import random
 import requests
 import zipfile
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 OWNER_CREDIT = "@farxxes"
 OWNER_LINK = "https://t.me/farxxes"
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8795234711:AAFWROowv0uHXfHrvVnqYlMUUM1amTAjedA')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8795234711:AAGhi9P7y-PEapBFwqDIbt-3KrKumdZsWTg')
 bot = telebot.TeleBot(BOT_TOKEN)
 
 ADMIN_IDS = [8713916851]
@@ -39,14 +40,41 @@ CHANNEL_LINK = os.environ.get('CHANNEL_LINK', 'https://t.me/faresschannel')
 DB_FILE = 'database.json'
 db_lock = threading.RLock()
 
-user_locks = {}
-user_locks_lock = threading.Lock()
+user_queues = {}
+user_workers = {}
+user_queues_lock = threading.Lock()
 
-def get_user_lock(user_id):
-    with user_locks_lock:
-        if user_id not in user_locks:
-            user_locks[user_id] = threading.Lock()
-        return user_locks[user_id]
+def enqueue_user_document(message):
+    user_id = message.from_user.id
+    with user_queues_lock:
+        if user_id not in user_queues:
+            user_queues[user_id] = queue.Queue()
+        q = user_queues[user_id]
+        pending_count = q.qsize()
+        worker_alive = user_workers.get(user_id) is not None and user_workers[user_id].is_alive()
+        q.put(message)
+        if not worker_alive:
+            t = threading.Thread(target=user_document_worker, args=(user_id, q), daemon=True)
+            user_workers[user_id] = t
+            t.start()
+            return 0, False
+        return pending_count + 1, True
+
+def user_document_worker(user_id, q):
+    try:
+        while True:
+            try:
+                msg = q.get(timeout=5)
+            except queue.Empty:
+                break
+            try:
+                process_uploaded_document(msg)
+            finally:
+                q.task_done()
+    finally:
+        with user_queues_lock:
+            if user_id in user_queues and user_queues[user_id].empty():
+                user_workers.pop(user_id, None)
 
 active_scans = {}
 user_languages = {}
@@ -714,7 +742,7 @@ def show_main_menu(chat_id, user_id):
             "👇 **Choose an option below:**"
         )
         markup.add(
-            InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
+            InlineKeyboardButton("🎟️ Pull Account (netflix)", callback_data="btn_pull_region"),
             InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
             InlineKeyboardButton("💳 Recharge Points & Invite", callback_data="btn_recharge"),
@@ -732,7 +760,7 @@ def show_main_menu(chat_id, user_id):
             "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
         )
         markup.add(
-            InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
+            InlineKeyboardButton("🎟️ سحب حساب (نتفلكس)", callback_data="btn_pull_region"),
             InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
             InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
             InlineKeyboardButton("💳 شحن النقاط ودعوة الأصدقاء", callback_data="btn_recharge"),
@@ -1228,7 +1256,7 @@ def callback_queries(call):
                 "👇 **Choose an option below:**"
             )
             markup.add(
-                InlineKeyboardButton("🎟️ Pull Account (netflix)", callback_data="btn_pull_region"),
+                InlineKeyboardButton("🎟️ Pull Account (Smart Filter)", callback_data="btn_pull_region"),
                 InlineKeyboardButton("👤 My Profile", callback_data="btn_profile"),
                 InlineKeyboardButton("🔄 Request Replacement", callback_data="btn_replace"),
                 InlineKeyboardButton("💳 Recharge Points & Invite", callback_data="btn_recharge"),
@@ -1240,13 +1268,13 @@ def callback_queries(call):
             welcome_text = (
                 f"🎬 **أهلاً بك في بوت فحص كوكيز Netflix الشامل والمطور!**\n\n"
                 f"💰 رصيدك الحالي: `{points}` نقطة 🪙\n"
-                "🔹 فحص الملفات والكوكيز (مجاني تماماً!).\n"
+                "🔹 فحص الملفات والكوكيز (مجاني وسريع جداً!).\n"
                 "🔹 سحب حساب ذكي حسب المنطقة والجودة.\n"
                 f"👨‍💻 **المطور:** [{OWNER_CREDIT}]({OWNER_LINK})\n\n"
                 "👇 **اختر ما تحتاجه من الأزرار أدناه:**"
             )
             markup.add(
-                InlineKeyboardButton("🎟️ سحب حساب (نتفلكس )", callback_data="btn_pull_region"),
+                InlineKeyboardButton("🎟️ سحب حساب (تصفية ذكية ومتطورة)", callback_data="btn_pull_region"),
                 InlineKeyboardButton("👤 حسابي وإحصائياتي", callback_data="btn_profile"),
                 InlineKeyboardButton("🔄 طلب تعويض (إذا لم يعمل)", callback_data="btn_replace"),
                 InlineKeyboardButton("💳 شحن النقاط ودعوة الأصدقاء", callback_data="btn_recharge"),
@@ -1380,14 +1408,19 @@ def handle_documents(message):
         send_sub_required_message(message, lang)
         return
 
-    user_scan_lock = get_user_lock(user_id)
-    if not user_scan_lock.acquire(blocking=False):
-        bot.reply_to(message, "⏳ **لديك عملية فحص ملف جارية حالياً.**\nيرجى الانتظار حتى ينتهي البوت من فحص ملفك الحالي ليبدأ في فحص هذا الملف تلقائياً.", parse_mode='Markdown')
-        return
+    position, queued = enqueue_user_document(message)
+    if queued:
+        fname = message.document.file_name or "ملف"
+        msg = (
+            f"📥 **تمت إضافة الملف `{fname}` إلى قائمة الانتظار (الترتيب: `{position}`).**\n"
+            "سيبدأ فحصه تلقائياً فور انتهاء الملف السابق."
+        ) if lang == 'ar' else (
+            f"📥 **File `{fname}` added to your scan queue (Position: `{position}`).**\n"
+            "It will start automatically once the current scan finishes."
+        )
+        bot.reply_to(message, msg, parse_mode='Markdown')
 
-    threading.Thread(target=process_uploaded_document, args=(message, user_scan_lock), daemon=True).start()
-
-def process_uploaded_document(message, user_scan_lock):
+def process_uploaded_document(message):
     user_id = message.from_user.id
     lang = user_languages.get(user_id, 'ar')
     stop_event = threading.Event()
@@ -1659,7 +1692,6 @@ def process_uploaded_document(message, user_scan_lock):
                 shutil.rmtree(temp_dir)
             except Exception:
                 pass
-        user_scan_lock.release()
 
 @bot.message_handler(func=lambda message: True)
 def handle_text_message(message):
